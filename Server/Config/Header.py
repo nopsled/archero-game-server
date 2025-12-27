@@ -3,13 +3,16 @@ import datetime
 # get the current time in GMT
 now = datetime.datetime.utcnow()
 # format the time as a string in the desired format
-formatted_time = now.strftime('%a, %d %b %Y %H:%M:%S %Z')
+formatted_time = now.strftime("%a, %d %b %Y %H:%M:%S %Z")
 
-RESPONSE_HEADER = b'''HTTP/2 200 OK
+RESPONSE_HEADER = (
+    b"""HTTP/2 200 OK
 Content-Type: application/json; charset=UTF-8
 Transfer-Encoding: chunked
 Connection: keep-alive
-Last-Modified: '''+formatted_time.encode()+b'''
+Last-Modified: """
+    + formatted_time.encode()
+    + b"""
 x-amz-server-side-encryption: AES256
 x-amz-version-id: tZRusENvTn.kue_2SfbTw8S9WaZIc4FN
 Server: AmazonS3
@@ -23,7 +26,8 @@ X-Amz-Cf-Pop: ARN56-P2
 X-Amz-Cf-Id: 7Xsj6-K_NKWYdZLKuf6zKCGn-7m7vRbFF4rBLQYr5BYjalphT9-YZg==
 Age: 2943
 
-'''
+"""
+)
 
 ENDPOINTS = [
     "data/config/MazeConfig.json",
@@ -42,5 +46,5 @@ ENDPOINTS = [
     "data/config/game_config.json",
     "data/config/game_activity_treasure.json",
     "data/config/worldcup_matches.json",
-    "data/config/battlePassConfigData.json"    
+    "data/config/battlePassConfigData.json",
 ]

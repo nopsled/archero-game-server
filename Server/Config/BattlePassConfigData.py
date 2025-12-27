@@ -1,4 +1,4 @@
-RESPONSE = '''{
+RESPONSE = """{
     "dataArray": [
         {
             "startTime": 1655136000,
@@ -1311,4 +1311,4 @@ RESPONSE = '''{
             ]
         }
     ]
-}'''
+}"""

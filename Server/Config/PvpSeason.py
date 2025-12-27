@@ -1,4 +1,4 @@
-RESPONSE = '''[
+RESPONSE = """[
     {
         "ID": 1,
         "endTime": 1613923200,
@@ -284,4 +284,4 @@ RESPONSE = '''[
         "endTime": 1681660800,
         "startTime": 1680451203
     }
-]'''
+]"""

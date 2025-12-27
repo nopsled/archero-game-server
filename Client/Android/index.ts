@@ -10,7 +10,7 @@ Patcher.PatchConnect("10.0.1.9", [443]);
 Il2Cpp.perform(() => {
   console.log("[Agent]: Injected and rebuilded");
 
-  const AssemblyCSharp = Il2Cpp.Domain.assembly("Assembly-CSharp").image;
+  const AssemblyCSharp = Il2Cpp.domain.assembly("Assembly-CSharp").image;
   //const AssemblyUnityWebRequestModule = Il2Cpp.Domain.assembly("UnityEngine.UnityWebRequestModule").image;
   //const AssemblyMsCorLib = Il2Cpp.Domain.assembly("mscorlib").image;
   // const AssemblyHabbyMail = Il2Cpp.Domain.assembly("HabbyMailLib").image;

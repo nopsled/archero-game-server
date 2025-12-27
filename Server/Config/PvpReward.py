@@ -1,5 +1,4 @@
-
-RESPONSE = '''[
+RESPONSE = """[
     {
         "ID": 1,
         "Rank": 1,
@@ -45885,4 +45884,4 @@ RESPONSE = '''[
         "Reward9_BoxType": "",
         "Season": 57
     }
-]'''
+]"""

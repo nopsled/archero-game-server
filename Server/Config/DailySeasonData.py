@@ -1,4 +1,4 @@
-RESPONSE = '''{
+RESPONSE = """{
     "dataArray": [
         {
             "ID": 10101,
@@ -4525,4 +4525,4 @@ RESPONSE = '''{
             "level": 500
         }
     ]
-}'''
+}"""

@@ -1,5 +1,4 @@
-
-RESPONSE_TO_CLIENT = '''
+RESPONSE_TO_CLIENT = """
     "MazeConfig": [
         {
             "StartTime": 1664121601,
@@ -2740,4 +2739,4 @@ RESPONSE_TO_CLIENT = '''
             "Line": "a;a,c|b;b,c|c;b,c|d;a,b,c"
         }
     }
-}'''
+}"""

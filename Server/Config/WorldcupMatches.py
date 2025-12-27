@@ -1,4 +1,4 @@
-RESPONSE = '''{
+RESPONSE = """{
     "Worldcup": [
         {
             "ID": 1,
@@ -1626,4 +1626,4 @@ RESPONSE = '''{
             "DisuseStage": 0
         }
     ]
-}'''
+}"""

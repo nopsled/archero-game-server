@@ -12,10 +12,13 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check --write .",
-    "build:ios": "frida-compile -o iOS/agent.js iOS/index.ts",
-    "build:android": "frida-compile -o Android/agent.js Android/index.ts",
-    "watch:ios": "frida-compile -o iOS/agent.js -w iOS/index.ts",
-    "watch:android": "frida-compile -o Android/agent.js -w Android/index.ts"
+    "build:ios": "frida-compile -o ios/agent.js ios/index.ts",
+    "build:android": "frida-compile -o android/agent.js android/index.ts",
+    "watch:ios": "frida-compile -o ios/agent.js -w ios/index.ts",
+    "watch:android": "frida-compile -o android/agent.js -w android/index.ts",
+    "inject:android": "cd .. && /Library/Developer/CommandLineTools/usr/bin/python3 client/injector.py android",
+    "inject:ios": "cd .. && /Library/Developer/CommandLineTools/usr/bin/python3 client/injector.py ios",
+    "inject:macos": "cd .. && /Library/Developer/CommandLineTools/usr/bin/python3 client/injector.py macos"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
@@ -24,5 +27,8 @@
     "@types/node": "^25.0.3",
     "frida-compile": "^19.0.4",
     "frida-il2cpp-bridge": "^0.12.1"
-  }
+  },
+  "trustedDependencies": [
+    "frida"
+  ]
 }

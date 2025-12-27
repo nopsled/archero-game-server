@@ -3,8 +3,21 @@ name = "archero-game-server"
 version = "0.0.1"
 description = "Archero game server"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "pyopenssl",
     "msgpack",
 ]
+
+[project.scripts]
+server = "server.core:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server"]
+
+[tool.uv]
+package = true

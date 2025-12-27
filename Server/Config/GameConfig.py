@@ -1,4 +1,4 @@
-RESPONSE = '''{
+RESPONSE = """{
     "key_max": 20,
     "key_max_start": 40,
     "key_recover_second": 720,
@@ -22,4 +22,4 @@ RESPONSE = '''{
     "SubDisplayOpen": 0,
     "SubDisplayVersion": 101,
     "BigMapOpenFlag": 0
-}'''
+}"""

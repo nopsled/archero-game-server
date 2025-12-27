@@ -1,186 +1,216 @@
-import psutil
+#!/usr/bin/env python3
+"""Frida script injector for Archero on multiple platforms."""
+
+from __future__ import annotations
+
+import argparse
+import shutil
 import subprocess
-import time
-import frida
 import sys
-import os
+import time
+from abc import ABC, abstractmethod
+from pathlib import Path
 
-class MacOSX:
-    def __init__(self):
-        self.PROCESS_NAME = "Archero"
-        self.SCRIPT_NAME = "agent.js"
-        self.PATH_NAME = r'/Users/'+os.getlogin()+'/Library/Containers/io.playcover.PlayCover/Archero.app'
-        
-    def start(self):
-        while True:
-            time.sleep(0.3)
-            if self.check_if_process_running():
-                self.kill_process()
-                print(f'[+]: {self.PROCESS_NAME} was killed.')
-                self.start_process()
-                print(f'[!]: {self.PROCESS_NAME} was started.')
-            else:
-                self.start_process()
-                print(f'[+] {self.PROCESS_NAME} was started.')
+import frida
+import psutil
 
-            # Wait for the process to start
-            while not self.check_if_process_running():
-                time.sleep(0.3)
+# Find frida executable - check common locations
+FRIDA_BIN = shutil.which("frida") or str(Path.home() / "Library/Python/3.9/bin/frida")
 
-            # Run the command
-            subprocess.call(["reset"])
-            subprocess.run(["sudo", "frida", "-l", self.SCRIPT_NAME,
-                        self.PROCESS_NAME])
-    
-    def check_if_process_running(self):
-        for process in psutil.process_iter():
+
+class Injector(ABC):
+    """Base class for platform-specific Frida injectors."""
+
+    process_name: str = "Archero"
+    bundle_name: str
+    script_path: Path
+
+    def __init__(self, script_path: Path | None = None):
+        if script_path:
+            self.script_path = script_path
+
+    @abstractmethod
+    def start(self) -> None:
+        """Start the injection process."""
+        pass
+
+    def kill_process(self) -> bool:
+        """Kill the target process."""
+        try:
+            subprocess.run(
+                ["frida-kill", "-U", self.process_name],
+                check=True,
+                capture_output=True,
+            )
+            print(f"[+] {self.process_name} killed")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"[-] Failed to kill {self.process_name}: {e}")
+            return False
+
+    def inject(self, spawn: bool = False) -> None:
+        """Inject the Frida script into the target process."""
+        if not self.script_path.exists():
+            print(f"[-] Script not found: {self.script_path}")
+            sys.exit(1)
+
+        cmd = [FRIDA_BIN, "-U", "-l", str(self.script_path)]
+
+        if spawn:
+            cmd.extend(["-f", self.bundle_name])
+        else:
+            cmd.append(self.process_name)
+
+        print(f"[*] Running: {' '.join(cmd)}")
+        subprocess.run(cmd)
+
+    def wait_for_process(self, timeout: int = 30) -> bool:
+        """Wait for the target process to appear on the device."""
+        print(f"[*] Waiting for {self.process_name}...")
+        device = frida.get_usb_device(timeout=5)
+
+        for _ in range(timeout):
+            processes = device.enumerate_processes()
+            for process in processes:
+                if process.name == self.process_name:
+                    print(f"[+] {self.process_name} found (PID: {process.pid})")
+                    return True
+            time.sleep(1)
+
+        print(f"[-] {self.process_name} not found after {timeout}s")
+        return False
+
+
+class AndroidInjector(Injector):
+    """Frida injector for Android devices."""
+
+    bundle_name = "com.habby.archero"
+    script_path = Path("client/android/agent.js")
+
+    def start(self) -> None:
+        """Spawn the app and inject the script."""
+        self.inject(spawn=True)
+
+
+class IOSInjector(Injector):
+    """Frida injector for iOS devices."""
+
+    bundle_name = "com.habby.archero.3Z58P8MNX4"
+    script_path = Path("client/ios/agent.js")
+
+    def start(self) -> None:
+        """Spawn the app and inject the script."""
+        self.inject(spawn=True)
+
+
+class MacOSInjector(Injector):
+    """Frida injector for macOS (PlayCover)."""
+
+    bundle_name = "io.playcover.PlayCover"
+    script_path = Path("agent.js")
+
+    def __init__(self, script_path: Path | None = None):
+        super().__init__(script_path)
+        self.app_path = (
+            Path.home() / "Library/Containers/io.playcover.PlayCover/Archero.app"
+        )
+
+    def is_running(self) -> bool:
+        """Check if the process is running."""
+        for proc in psutil.process_iter(["name"]):
             try:
-                if self.PROCESS_NAME.lower() in process.name().lower():
+                if self.process_name.lower() in proc.info["name"].lower():
                     return True
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
         return False
 
-
-    def start_process(self):
-        subprocess.call(["sudo", "open", self.PATH_NAME])
-
-
-    def kill_process(self):
-        for process in psutil.process_iter():
+    def kill_process(self) -> bool:
+        """Kill the process on macOS."""
+        for proc in psutil.process_iter(["name"]):
             try:
-                if self.PROCESS_NAME.lower() in process.name().lower():
-                    process.kill()
+                if self.process_name.lower() in proc.info["name"].lower():
+                    proc.kill()
+                    print(f"[+] {self.process_name} killed")
+                    return True
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
-class iOS:
-    def __init__(self):
-        self.CONNECTED_TO_PHONE = False
-        self.ATTACHED_TO_PROCESS = False
-        self.PROCESS_FOUND = False
-        
-        self.PROCESS_NAME = "Archero"
-        self.BUNDLE_NAME = "com.habby.archero.3Z58P8MNX4"
-        self.SCRIPT_NAME = "iOS/agent.js"
-    
-    def killProcess(self):
-        try:
-            subprocess.run(["sudo", "frida-kill", "-U", self.PROCESS_NAME])
-            print(f'[+]: Process killed')
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f'[-]: Process not killed, error: {e}')
-            return False
-    
-    # Do not kill process, only attach to already running process.
-    def injectScript(self):
-        try:
-            subprocess.run(["sudo", "frida", "-U", "-l", "agent.js"])
-            print(f'[+]: Script injected')
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f'[-]: Script not injected, error: {e}')
-            return False
-    
-    # Do not kill process, only attach to already running process.
-    def startAndinject(self):
-        try:
-            subprocess.run(["sudo", "frida", "-U", "-l", "agent.js", "-f",
-                           "com.habby.archero.3Z58P8MNX4"])
-            print(f'[+]: Process started and script injected')
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f'[-]: Process not started and script not injected, error: {e}')
-            return False
+        return False
 
-    def awaitProcess(self):
-        while self.PROCESS_FOUND == False:
-            time.sleep(1)
-            processes = device.enumerate_processes()
-            for process in processes:
-                if process.name == "Archero":
-                    print("[+]: Archero found")
-                    return
-            else:
-                print("[-]: Archero not found, waiting...")
-     
-    
-    def start(self):
-        #self.startAndinject()
-        subprocess.run(["sudo", "frida", "-U", "-l", "agent.js", "-f",
-                        "com.habby.archero.3Z58P8MNX4"])
-        print(f'[+]: Process started and script injected')   
-class Android:
-    def __init__(self):
-        self.CONNECTED_TO_PHONE = False
-        self.ATTACHED_TO_PROCESS = False
-        self.PROCESS_FOUND = False
-        
-        self.PROCESS_NAME = "Archero"
-        self.BUNDLE_NAME = "com.habby.archero"
-        self.SCRIPT_NAME = "Android/agent.js"
-        
-    def killProcess(self):
-        try:
-            subprocess.run(["sudo", "frida-kill", "-U", self.PROCESS_NAME])
-            print(f'[+]: Process killed')
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f'[-]: Process not killed, error: {e}')
-            return False
+    def start_app(self) -> None:
+        """Start the app using open command."""
+        subprocess.run(["open", str(self.app_path)], check=True)
+        print(f"[+] {self.process_name} started")
 
-    # Do not kill process, only attach to already running process.
-    def injectScript(self):
-        try:
-            subprocess.run(["sudo", "frida", "-U", "Archero", "-l", self.SCRIPT_NAME])
-            print(f'[+]: Script injected')
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f'[-]: Script not injected, error: {e}')
-            return False
+    def start(self) -> None:
+        """Kill, restart, and inject into the app."""
+        if self.is_running():
+            self.kill_process()
 
-    # Do not kill process, only attach to already running process.
-    def startAndinject(self):
-        try:
-            subprocess.run(["sudo", "frida", "-U", "-l", SELF.SCRIPT_NAME, "-f",
-                           self.BUNDLE_NAME])
-            print(f'[+]: Process started and script injected')
-            return True
-        except subprocess.CalledProcessError as e:
-            print(
-                f'[-]: Process not started and script not injected, error: {e}')
-            return False
+        self.start_app()
 
-    def awaitProcess(self):
-        while self.PROCESS_FOUND == False:
-            time.sleep(1)
-            processes = device.enumerate_processes()
-            for process in processes:
-                if process.name == "Archero":
-                    print("[+]: Archero found")
-                    return
-            else:
-                print("[-]: Archero not found, waiting...")
+        # Wait for app to start
+        for _ in range(10):
+            if self.is_running():
+                break
+            time.sleep(0.5)
 
-    def start(self):
-        #self.killAndInject()
-        subprocess.run(["sudo", "frida", "-U", "-l", self.SCRIPT_NAME, "-f",
-                        self.BUNDLE_NAME])
-        print(f'[+]: Process started and script injected')
+        subprocess.run(["frida", "-l", str(self.script_path), self.process_name])
 
-    
 
-IS_ANDROID = 1  
-IS_IOS = 0
-IS_MACOSX = 0 
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Inject Frida scripts into Archero",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s android          Spawn and inject on Android
+  %(prog)s ios              Spawn and inject on iOS  
+  %(prog)s macos            Kill, restart, and inject on macOS
+  %(prog)s android --attach Attach to running process (don't spawn)
+        """,
+    )
+
+    parser.add_argument(
+        "platform",
+        choices=["android", "ios", "macos"],
+        help="Target platform",
+    )
+    parser.add_argument(
+        "--attach",
+        action="store_true",
+        help="Attach to running process instead of spawning",
+    )
+    parser.add_argument(
+        "--script",
+        type=Path,
+        help="Custom script path (overrides default)",
+    )
+    parser.add_argument(
+        "--kill",
+        action="store_true",
+        help="Kill the process and exit",
+    )
+
+    args = parser.parse_args()
+
+    injectors = {
+        "android": AndroidInjector,
+        "ios": IOSInjector,
+        "macos": MacOSInjector,
+    }
+
+    injector = injectors[args.platform](args.script)
+
+    if args.kill:
+        injector.kill_process()
+        return
+
+    if args.attach and args.platform != "macos":
+        injector.inject(spawn=False)
+    else:
+        injector.start()
+
 
 if __name__ == "__main__":
-    if IS_ANDROID:
-        android = Android()
-        android.start()
-    elif IS_IOS:
-        ios = iOS()
-        ios.start()
-    elif IS_MACOSX:
-        computer = Computer()
-        computer.start()
+    main()

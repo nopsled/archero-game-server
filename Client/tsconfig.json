@@ -18,8 +18,8 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "Android/**/*.ts",
-    "iOS/**/*.ts"
+    "android/**/*.ts",
+    "ios/**/*.ts"
   ],
   "exclude": [
     "node_modules"

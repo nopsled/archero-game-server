@@ -1,4 +1,4 @@
-RESPONSE = '''[
+RESPONSE = """[
     {
         "Id": 1,
         "Notes": "第1赛季",
@@ -624,4 +624,4 @@ RESPONSE = '''[
         "MonsterBoxCycle": 9023
     }
 ]
-'''
+"""

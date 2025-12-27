@@ -1,4 +1,4 @@
-RESPONSE = '''{
+RESPONSE = """{
     "activity": [
         {
             "tag": 1,
@@ -1804,4 +1804,4 @@ RESPONSE = '''{
             ]
         }
     ]
-}'''
+}"""

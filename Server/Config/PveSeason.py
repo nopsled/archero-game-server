@@ -1,4 +1,4 @@
-RESPONSE = '''[
+RESPONSE = """[
     {
         "ID": 1,
         "StartTime": 1656882000,
@@ -60,4 +60,4 @@ RESPONSE = '''[
         "ConvertShopEnd": 0
     }
 ]
-'''
+"""

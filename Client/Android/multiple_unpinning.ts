@@ -1,3 +1,4 @@
+/// <reference path="../frida.d.ts" />
 /*  Frida script to bypass multiple certificate pinning methods
     Run with: frida -U -f [APP_ID] -l frida_multiple_unpinning.js --no-pause
     Original author: Maurizio Siddu

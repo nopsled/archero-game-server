@@ -1,4 +1,4 @@
-RESPONSE =  '''{
+RESPONSE = """{
     "MazeLine": [
         {
             "ID": 1000,
@@ -2557,4 +2557,4 @@ RESPONSE =  '''{
             "Line": "a;a,c|b;b,c|c;b,c|d;a,b,c"
         }
     ]
-}'''
+}"""

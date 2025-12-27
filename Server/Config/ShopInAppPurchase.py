@@ -1,4 +1,4 @@
-RESPONSE = '''[
+RESPONSE = """[
     {
         "product_id": "com.habby.archero_d1",
         "row_iap_id": 1,
@@ -5964,4 +5964,4 @@ RESPONSE = '''[
         "iap_type": 4,
         "privilege_num": 4125
     },
-]'''
+]"""

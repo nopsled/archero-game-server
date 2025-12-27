@@ -1,3 +1,4 @@
+/// <reference path="../frida.d.ts" />
 const getaddrinfoPtr = Module.findExportByName(null, "getaddrinfo");
 const connectPtr = Module.findExportByName(null, "connect");
 const sendPtr = Module.findExportByName(null, "send");
