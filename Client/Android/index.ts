@@ -5,7 +5,7 @@ import { Patcher } from "./socket_patcher";
 // Start bypass SSL pinning
 FridaMultipleUnpinning.bypass(false);
 // Patch socket connect for port 443 to localhost
-Patcher.PatchConnect("10.0.1.9", [443]);
+Patcher.PatchConnect("10.0.1.22", [443]);
 
 Il2Cpp.perform(() => {
   console.log("[Agent]: Injected and rebuilded");
