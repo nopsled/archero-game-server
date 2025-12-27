@@ -8,6 +8,7 @@
 export class FridaMultipleUnpinning {
   public static bypass(isDebugging = false) {
     Java.perform(() => {
+      try {
       console.log("");
       console.log("======");
       console.log("[#] Android Bypass for various Certificate Pinning methods [#]");
@@ -30,13 +31,13 @@ export class FridaMultipleUnpinning {
       });
       // Prepare the TrustManager array to pass to SSLContext.init()
       var TrustManagers = [TrustManager.$new()];
-      // Get a handle on the init() on the SSLContext class
-      var SSLContext_init = SSLContext.init.overload(
-        "[Ljavax.net.ssl.KeyManager;",
-        "[Ljavax.net.ssl.TrustManager;",
-        "java.security.SecureRandom"
-      );
       try {
+        // Get a handle on the init() on the SSLContext class
+        var SSLContext_init = SSLContext.init.overload(
+          "[Ljavax.net.ssl.KeyManager;",
+          "[Ljavax.net.ssl.TrustManager;",
+          "java.security.SecureRandom"
+        );
         // Override the init method, specifying the custom TrustManager
         SSLContext_init.implementation = function (
           keyManager: any,
@@ -47,8 +48,7 @@ export class FridaMultipleUnpinning {
           SSLContext_init.call(this, keyManager, TrustManagers, secureRandom);
         };
       } catch (err) {
-        if (isDebugging) console.log("[-] TrustManager (Android < 7) pinner not found");
-        //console.log(err);
+        if (isDebugging) console.log("[-] TrustManager (Android < 7) hook failed");
       }
 
       // OkHTTPv3 (quadruple bypass) //
@@ -160,6 +160,9 @@ export class FridaMultipleUnpinning {
         if (isDebugging)
           console.log("[-] TrustManagerImpl (Android > 7) verifyChain check not found");
         //console.log(err);
+      }
+      } catch (err: any) {
+        console.log(`[#] Unpinning script error: ${err}`);
       }
     });
   }

@@ -31,7 +31,7 @@ cd archero‑private‑server
 # 2. Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 3. Install dependencies (Python ≥ 3.14)
+# 3. Install dependencies (Python ≥ 3.13)
 uv sync
 
 # 4. Run (needs sudo to bind :443)
@@ -47,6 +47,70 @@ The console should show:
 ```
 
 Connect an Android emulator or MITM proxy to **`https://127.0.0.1`** and watch the fake responses flow.
+
+---
+
+## 📱 Android (MuMu / Emulators) Injection
+
+This repo includes a Frida agent in `client/` that:
+- Bypasses common TLS pinning (`client/android/multiple_unpinning.ts`)
+- Patches `connect()` so HTTPS `:443` goes to your local server (`client/android/socket_patcher.ts`)
+
+### Prereqs
+
+- Archero installed in the emulator/device (package: `com.habby.archero`)
+- `adb` working (for MuMu shown as a TCP device like `127.0.0.1:26657`)
+- `bun` installed (for building the agent)
+
+### 1) Start the server (Mac host)
+
+```bash
+sudo uv run server
+```
+
+### 2) Reverse port 443 (recommended)
+
+Most emulators can’t reach your Mac directly, but `adb reverse` makes the emulator’s `127.0.0.1:443`
+forward to your Mac’s `127.0.0.1:443`.
+
+```bash
+adb -s 127.0.0.1:26657 reverse tcp:443 tcp:443
+adb -s 127.0.0.1:26657 reverse --list
+```
+
+### 3) Build the Android agent
+
+```bash
+cd client
+bun install
+bun run build:android
+```
+
+### 4) Run frida-server (if needed)
+
+If attach/spawn is unreliable, running `frida-server` inside the emulator is the most stable setup.
+On rooted/permissive emulators you can run it from `/data/local/tmp/frida-server`.
+
+### 5) Inject (spawn-gating, most reliable)
+
+Archero often kills or blocks late attach. Use spawn-gating (`-W`) and restart the app so Frida
+catches it at launch:
+
+```bash
+cd ..
+/Library/Developer/CommandLineTools/usr/bin/python3 client/injector.py android --await-spawn --restart --device 127.0.0.1:26657
+```
+
+You should see in the Frida console:
+- `[Agent]: Script loaded`
+- `[SocketPatcher] exports ...`
+- `Installing connect hook -> 127.0.0.1 ports=[443]`
+- realtime `connect(...)` logs (and `send/recv` logs for patched sockets)
+
+### Changing the redirect IP
+
+The redirect is configured in `client/android/index.ts`. Default is `127.0.0.1` (meant for use with
+`adb reverse`). If you want to route directly to a host IP instead, replace it with your Mac’s LAN IP.
 
 ---
 

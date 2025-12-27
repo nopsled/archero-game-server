@@ -2,12 +2,19 @@ import "frida-il2cpp-bridge";
 import { FridaMultipleUnpinning } from "./multiple_unpinning";
 import { Patcher } from "./socket_patcher";
 
-// Start bypass SSL pinning
-FridaMultipleUnpinning.bypass(false);
-// Patch socket connect for port 443 to localhost
-Patcher.PatchConnect("10.0.1.22", [443]);
+console.log("[Agent]: Script loaded");
 
-Il2Cpp.perform(() => {
+const ENABLE_IL2CPP_HOOKS = false;
+
+// Start bypass SSL pinning
+FridaMultipleUnpinning.bypass(true);
+// Recommended with emulators: `adb reverse tcp:443 tcp:443` then patch to localhost.
+Patcher.PatchConnect("127.0.0.1", [443], true);
+
+if (!ENABLE_IL2CPP_HOOKS) {
+  console.log("[Agent]: Il2Cpp hooks disabled (ENABLE_IL2CPP_HOOKS=false)");
+} else {
+  Il2Cpp.perform(() => {
   console.log("[Agent]: Injected and rebuilded");
 
   const AssemblyCSharp = Il2Cpp.domain.assembly("Assembly-CSharp").image;
@@ -394,4 +401,5 @@ Il2Cpp.perform(() => {
   //         return this.method(method.name).invoke(...args);
   //     }
   // }));
-});
+  });
+}
