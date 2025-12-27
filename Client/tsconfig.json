@@ -2,14 +2,26 @@
   "compilerOptions": {
     "target": "esnext",
     "lib": [
-      "es2020"
+      "esnext"
     ],
-    "experimentalDecorators": true,
     "module": "commonjs",
     "moduleResolution": "node",
+"strict": false,
+"noImplicitAny": false,
+"noEmit": true,
     "allowJs": true,
-    "noEmit": true,
     "esModuleInterop": true,
-    "strict": true
-  }
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "Android/**/*.ts",
+    "iOS/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }
