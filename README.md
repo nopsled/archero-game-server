@@ -12,7 +12,7 @@ It listens on **`0.0.0.0:443`** (TLS) and fakes enough endpoints to let a local 
 
 | Module / Concept | What It Does | File / Symbol |
 |------------------|-------------|---------------|
-| TLS bootstrap    | Generates an ad‑hoc self‑signed cert (`cert.pem`, `key.pem`) at launch and wraps accepted sockets. | `generate_cert()` + `ssl.wrap_socket` |
+| TLS bootstrap    | Generates an ad‑hoc self‑signed cert (`.local/certs/cert.pem`, `.local/certs/key.pem`) at launch and wraps accepted sockets. | `generate_cert()` + `ssl.wrap_socket` |
 | Static responses | Hard‑coded HTTP/1.1 and HTTP/2 payloads for critical Archero endpoints: `…/announcements`, `…/installations`, `…/sync`, `…/config`, `app.adjust.com/session`, Crashlytics settings, etc. | `Client.recv()` branch‑by‑substring |
 | Multi‑client loop| Each incoming connection spawns a `threading.Thread` and drives a blocking `recv()` loop. | `onNewClient()` / `loop()` |
 | Hot kill‑switch  | Kills any lingering `python` PIDs at startup so port 443 is always free. | `subprocess.run(["sudo", "pkill", "python"])` |
@@ -35,7 +35,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 
 # 4. Run (needs sudo to bind :443)
-sudo uv run python Server/Core.py
+sudo uv run server
 ```
 
 The console should show:
@@ -56,14 +56,14 @@ Connect an Android emulator or MITM proxy to **`https://127.0.0.1`** and watch t
 | ----------- | ------------------------- | --------------------------------------------------- |
 | `ports`     | `[443]`                   | TCP ports to open (additional ports commented out). |
 | `sslPort`   | `443`                     | Port wrapped in TLS.                                |
-| `ENDPOINTS` | `Config.Header.ENDPOINTS` | Dict of substring → body; edit to spoof new calls.  |
+| `ENDPOINTS` | `server.config.header.ENDPOINTS` | Dict of substring → body; edit to spoof new calls.  |
 
 ---
 
 ## 🛠️ Extending
 
 1. **Add an endpoint**
-   *Edit* `Config/Header.py` → append substring key and raw bytes value.
+   *Edit* `server/config/header.py` → append substring key and raw bytes value.
    Optionally implement a real handler under the `API` class.
 
 2. **Inject gameplay**
@@ -91,7 +91,7 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management. De
 - **pyopenssl** – TLS certificate generation
 - **msgpack** – Message serialization
 
-> Requires **Python ≥ 3.14** and **macOS / Linux**.
+> Requires **Python ≥ 3.13** and **macOS / Linux**.
 
 ---
 

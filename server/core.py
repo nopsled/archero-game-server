@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# sudo nodemon - -exec python Core.py
+# sudo nodemon - -exec python core.py
 import random
 import socket
 import msgpack
@@ -14,9 +14,13 @@ import base64
 import subprocess
 from OpenSSL import crypto
 import os
-import time
+from pathlib import Path
 
-from .config import Header
+from .config import header
+
+CERT_DIR = Path(os.environ.get("ARCHERO_CERT_DIR", ".local/certs"))
+CERT_PATH = CERT_DIR / "cert.pem"
+KEY_PATH = CERT_DIR / "key.pem"
 
 
 class GameWorldManager:
@@ -66,6 +70,8 @@ class PlayerObject:
 
 
 def generate_cert():
+    CERT_DIR.mkdir(parents=True, exist_ok=True)
+
     # Create a self-signed certificate
     cert = crypto.X509()
     cert.get_subject().CN = "habby.mobi"
@@ -77,12 +83,10 @@ def generate_cert():
     cert.sign(pkey, "sha256")
 
     # Write the certificate to a file
-    with open("cert.pem", "wb") as f:
-        f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+    CERT_PATH.write_bytes(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
 
     # Write the private key to a file
-    with open("key.pem", "wb") as f:
-        f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey))
+    KEY_PATH.write_bytes(crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey))
 
 
 def parse_socket_data(socket_data):
@@ -149,12 +153,12 @@ class Client:
                 data2 = urllib.parse.parse_qs(strippedData)
                 print("")
 
-                for endpoint in Header.ENDPOINTS:
+                for endpoint in header.ENDPOINTS:
                     if endpoint in decodedData:
                         print(
                             f"[+] Client requested: {endpoint}, response sent back to client."
                         )
-                        response = Header.RESPONSE_HEADER + endpoints[endpoint]
+                        response = header.RESPONSE_HEADER + endpoints[endpoint]
                         self.socket.send(response)
                         print(response)
                         break
@@ -313,7 +317,7 @@ def loop(socket, port, isSSL):
         (client_socket, client_address) = socket.accept()
         if isSSL == True:
             context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            context.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
+            context.load_cert_chain(certfile=str(CERT_PATH), keyfile=str(KEY_PATH))
             try:
                 client_socket = context.wrap_socket(client_socket, server_side=True)
                 print(f"[+] SSL handshake successful: {client_address}")

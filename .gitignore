@@ -1,5 +1,7 @@
 # Local generated.
-Server/Certificates/*
+.local/
+cert.pem
+key.pem
 
 ### Node ###
 # Logs
@@ -43,7 +45,7 @@ bower_components
 build/Release
 
 # Dependency directories
-Client/node_modules/
+client/node_modules/
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)
@@ -190,6 +192,9 @@ Temporary Items
 
 # End of https://www.toptal.com/developers/gitignore/api/macos
 
-.venv
-__pycache__
-uv.lock
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
