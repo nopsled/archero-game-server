@@ -8,7 +8,6 @@
 export class FridaMultipleUnpinning {
   public static bypass(isDebugging = false) {
     Java.perform(() => {
-      try {
       console.log("");
       console.log("======");
       console.log("[#] Android Bypass for various Certificate Pinning methods [#]");
@@ -19,36 +18,41 @@ export class FridaMultipleUnpinning {
 
       // TrustManager (Android < 7) //
       ////////////////////////////////
-      var TrustManager = Java.registerClass({
-        // Implement a custom TrustManager
-        name: "dev.asd.test.TrustManager",
-        implements: [X509TrustManager],
-        methods: {
-          checkClientTrusted: (chain, authType) => {},
-          checkServerTrusted: (chain, authType) => {},
-          getAcceptedIssuers: () => [],
-        },
-      });
-      // Prepare the TrustManager array to pass to SSLContext.init()
-      var TrustManagers = [TrustManager.$new()];
       try {
-        // Get a handle on the init() on the SSLContext class
-        var SSLContext_init = SSLContext.init.overload(
-          "[Ljavax.net.ssl.KeyManager;",
-          "[Ljavax.net.ssl.TrustManager;",
-          "java.security.SecureRandom"
-        );
-        // Override the init method, specifying the custom TrustManager
-        SSLContext_init.implementation = function (
-          keyManager: any,
-          trustManager: any,
-          secureRandom: any
-        ) {
-          if (isDebugging) console.log("[+] Bypassing Trustmanager (Android < 7) pinner");
-          SSLContext_init.call(this, keyManager, TrustManagers, secureRandom);
-        };
+        var TrustManager = Java.registerClass({
+          // Implement a custom TrustManager
+          name: "dev.asd.test.TrustManager",
+          implements: [X509TrustManager],
+          methods: {
+            checkClientTrusted: (chain, authType) => {},
+            checkServerTrusted: (chain, authType) => {},
+            getAcceptedIssuers: () => [],
+          },
+        });
+        // Prepare the TrustManager array to pass to SSLContext.init()
+        var TrustManagers = [TrustManager.$new()];
+        try {
+          // Get a handle on the init() on the SSLContext class
+          var SSLContext_init = SSLContext.init.overload(
+            "[Ljavax.net.ssl.KeyManager;",
+            "[Ljavax.net.ssl.TrustManager;",
+            "java.security.SecureRandom"
+          );
+          // Override the init method, specifying the custom TrustManager
+          SSLContext_init.implementation = function (
+            keyManager: any,
+            trustManager: any,
+            secureRandom: any
+          ) {
+            if (isDebugging) console.log("[+] Bypassing Trustmanager (Android < 7) pinner");
+            SSLContext_init.call(this, keyManager, TrustManagers, secureRandom);
+          };
+        } catch (err) {
+          if (isDebugging) console.log("[-] TrustManager (Android < 7) hook failed");
+        }
       } catch (err) {
-        if (isDebugging) console.log("[-] TrustManager (Android < 7) hook failed");
+        // Some environments disallow Java.registerClass() (e.g. temp/dex write restrictions).
+        console.log(`[#] TrustManager (Android < 7) install failed: ${err}`);
       }
 
       // OkHTTPv3 (quadruple bypass) //
@@ -116,54 +120,54 @@ export class FridaMultipleUnpinning {
 
       // TrustManagerImpl (Android > 7) //
       ////////////////////////////////////
-      try {
-        // Bypass TrustManagerImpl (Android > 7) {1}
-        var array_list = Java.use("java.util.ArrayList");
-        var TrustManagerImpl_Activity_1 = Java.use("com.android.org.conscrypt.TrustManagerImpl");
-        TrustManagerImpl_Activity_1.checkTrustedRecursive.implementation = (
-          certs: any,
-          ocspData: any,
-          tlsSctData: any,
-          host: any,
-          clientAuth: any,
-          untrustedChain: any,
-          trustAnchorChain: any,
-          used: any
-        ) => {
-          if (isDebugging)
-            console.log(
-              "[+] Bypassing TrustManagerImpl (Android > 7) checkTrustedRecursive check: " + host
-            );
-          return array_list.$new();
-        };
-      } catch (err) {
-        if (isDebugging)
-          console.log("[-] TrustManagerImpl (Android > 7) checkTrustedRecursive check not found");
-        //console.log(err);
-      }
-      try {
-        // Bypass TrustManagerImpl (Android > 7) {2} (probably no more necessary)
-        var TrustManagerImpl_Activity_2 = Java.use("com.android.org.conscrypt.TrustManagerImpl");
-        TrustManagerImpl_Activity_2.verifyChain.implementation = (
-          untrustedChain: any,
-          trustAnchorChain: any,
-          host: any,
-          clientAuth: any,
-          ocspData: any,
-          tlsSctData: any
-        ) => {
-          if (isDebugging)
-            console.log("[+] Bypassing TrustManagerImpl (Android > 7) verifyChain check: " + host);
-          return untrustedChain;
-        };
-      } catch (err) {
-        if (isDebugging)
-          console.log("[-] TrustManagerImpl (Android > 7) verifyChain check not found");
-        //console.log(err);
-      }
-      } catch (err: any) {
-        console.log(`[#] Unpinning script error: ${err}`);
-      }
+      const patchTrustManagerImpl = (className: string) => {
+        // Bypass TrustManagerImpl (Android > 7) across different providers.
+        try {
+          var array_list = Java.use("java.util.ArrayList");
+          const TrustManagerImpl = Java.use(className);
+          if (TrustManagerImpl.checkTrustedRecursive) {
+            TrustManagerImpl.checkTrustedRecursive.implementation = (
+              certs: any,
+              ocspData: any,
+              tlsSctData: any,
+              host: any,
+              clientAuth: any,
+              untrustedChain: any,
+              trustAnchorChain: any,
+              used: any
+            ) => {
+              if (isDebugging)
+                console.log(`[+] Bypassing ${className} checkTrustedRecursive check: ${host}`);
+              return array_list.$new();
+            };
+          }
+        } catch (err) {
+          if (isDebugging) console.log(`[-] ${className} checkTrustedRecursive hook not available`);
+        }
+
+        try {
+          const TrustManagerImpl = Java.use(className);
+          if (TrustManagerImpl.verifyChain) {
+            TrustManagerImpl.verifyChain.implementation = (
+              untrustedChain: any,
+              trustAnchorChain: any,
+              host: any,
+              clientAuth: any,
+              ocspData: any,
+              tlsSctData: any
+            ) => {
+              if (isDebugging) console.log(`[+] Bypassing ${className} verifyChain check: ${host}`);
+              return untrustedChain;
+            };
+          }
+        } catch (err) {
+          if (isDebugging) console.log(`[-] ${className} verifyChain hook not available`);
+        }
+      };
+
+      patchTrustManagerImpl("com.android.org.conscrypt.TrustManagerImpl");
+      patchTrustManagerImpl("org.conscrypt.TrustManagerImpl");
+      patchTrustManagerImpl("com.google.android.gms.org.conscrypt.TrustManagerImpl");
     });
   }
 }

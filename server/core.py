@@ -17,6 +17,30 @@ import os
 from pathlib import Path
 
 from .config import header
+from .config.static_config import load_config_json
+from .config.player_profile import load_player_profile
+
+
+def _load_json_override(path_env: str, json_env: str) -> object | None:
+    inline = os.environ.get(json_env)
+    if inline:
+        try:
+            return json.loads(inline)
+        except Exception as e:
+            print(f"[-] Failed to parse {json_env}: {e}")
+            return None
+
+    path = os.environ.get(path_env)
+    if not path:
+        return None
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8", errors="replace"))
+    except Exception as e:
+        print(f"[-] Failed to read/parse {path_env}={path}: {e}")
+        return None
+
+
+ACTIVE_CONFIG_PROFILE = os.environ.get("ARCHERO_CONFIG_PROFILE", "").strip()
 
 
 def resolve_cert_dir() -> Path:
@@ -269,6 +293,23 @@ def parse_socket_data(socket_data):
     return header_dict, body
 
 
+def _http_response(status: str, headers: dict[str, str], body: bytes) -> bytes:
+    head = [f"HTTP/1.1 {status}"]
+    merged = {"Connection": "keep-alive", **headers, "Content-Length": str(len(body))}
+    for k, v in merged.items():
+        head.append(f"{k}: {v}")
+    head_bytes = ("\r\n".join(head) + "\r\n\r\n").encode("utf-8")
+    return head_bytes + body
+
+
+def _json_response(obj: object, *, status: str = "200 OK", headers: dict[str, str] | None = None) -> bytes:
+    body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    h = {"Content-Type": "application/json; charset=UTF-8"}
+    if headers:
+        h.update(headers)
+    return _http_response(status, h, body)
+
+
 class NetUtility:
     @staticmethod
     def parse_data(data):
@@ -414,6 +455,7 @@ class Client:
 
     def recv(self):
         h2_buffer = bytearray()
+        http_buffer = bytearray()
         if self.alpn == "h2":
             try:
                 self._send_h2_settings()
@@ -486,171 +528,231 @@ class Client:
                             print(f"[-] Failed to respond to H2 control frame: {e}")
                     continue
 
-                headers, body = parse_socket_data(received_data)
-                if headers:
+                http_buffer.extend(received_data)
+
+                delimiter = b"\r\n\r\n"
+                while True:
+                    idx = http_buffer.find(delimiter)
+                    if idx == -1:
+                        break
+
+                    head_bytes = bytes(http_buffer[:idx])
+                    head = head_bytes.decode("utf-8", errors="replace")
+                    header_lines = head.split("\r\n")
+                    if not header_lines:
+                        break
+
+                    request_line = header_lines[0]
+                    headers: dict[str, str] = {":request-line": request_line}
+                    for line in header_lines[1:]:
+                        if ": " not in line:
+                            continue
+                        key, value = line.split(": ", 1)
+                        headers[key] = value
+
+                    content_length = 0
+                    try:
+                        content_length = int(headers.get("Content-Length", "0"))
+                    except ValueError:
+                        content_length = 0
+
+                    body_start = idx + len(delimiter)
+                    needed = body_start + max(0, content_length)
+                    if len(http_buffer) < needed:
+                        # wait for more body bytes
+                        break
+
+                    request_bytes = bytes(http_buffer[:needed])
+                    body = bytes(http_buffer[body_start:needed])
+                    del http_buffer[:needed]
+
+                    # Debug prints (truncated)
                     print("Headers:")
                     for key, value in headers.items():
                         print(f"{key}: {value}")
-                if body:
-                    snippet = body[:256]
-                    print(
-                        f"Body: {snippet!r}"
-                        + ("" if len(body) <= 256 else f" …(+{len(body) - 256}b)")
-                    )
-
-                decodedData = received_data.decode()
-                strippedData = decodedData.strip()
-                data2 = urllib.parse.parse_qs(strippedData)
-                print("")
-
-                for endpoint in header.ENDPOINTS:
-                    if endpoint in decodedData:
+                    if body:
+                        snippet = body[:256]
                         print(
-                            f"[+] Client requested: {endpoint}, response sent back to client."
+                            f"Body: {snippet!r}"
+                            + ("" if len(body) <= 256 else f" …(+{len(body) - 256}b)")
                         )
-                        response = header.RESPONSE_HEADER + b"{}"
-                        self.socket.send(response)
-                        print(response)
-                        break
-
-                if "announcements" in decodedData:
-                    formatted_time = time.strftime(
-                        "%a, %d %b %Y %H:%M:%S GMT", time.gmtime()
-                    )
-                    response = (
-                        b"HTTP/2 200 OK\r\n"
-                        b"Content-Type: application/json; charset=UTF-8\r\n"
-                        b"Content-length: 29\r\n"
-                        b"Connection: close\r\n"
-                        b"Date: " + formatted_time.encode("utf-8") + b"\r\n"
-                        b"X-Powered-By: Express\r\n"
-                        b'ETag: W/"1d-qTxd3JymBGkwYt6o0i73c1lZiUA"\r\n'
-                        b"X-Cache: Miss from cloudfront\r\n"
-                        b"Via: 1.1 cfd5f3f9049bdb2faa50d6a13e6adb78.cloudfront.net (CloudFront)\r\n"
-                        b"X-Amz-Cf-Pop: ARN56-P1\r\n"
-                        b"X-Amz-Cf-Id: 0-eFHmiIVp3rpMPZcP8jAo5WLA3f1m-zO5vyG8OyUQGHDqlpyvuUCA==\r\n\r\n"
-                        b""" {
-                                           "code": 0,
-                                           "data": {
-                                               "list": []
-                                           }
-                                       }"""
-                    )
-
-                    # response = b'''HTTP/1.1 304 Not Modified
-                    # Connection: close
-                    # Vary: Accept-Encoding
-                    # Date: Mon, 20 Feb 2023 19:17:23 GMT
-                    # X-Powered-By: Express
-                    # ETag: W/"1d-qTxd3JymBGkwYt6o0i73c1lZiUA"
-                    # X-Cache: Miss from cloudfront
-                    # Via: 1.1 648da69bb4c2221c403be08a06311d98.cloudfront.net (CloudFront)
-                    # X-Amz-Cf-Pop: ARN56-P1
-                    # X-Amz-Cf-Id: YSLMFVKf-ZDsrj_ZRkCdupmcUJyeqrh3HdcMryFo8vZIw_mx7frGNQ==\r\n\r\n
-                    # {
-                    #     "code": 0,
-                    #     "data": {
-                    #         "list": []
-                    #     }
-                    # }'''
-                    print(
-                        "[+] API request: users/<id>/announcements, response sent back to client."
-                    )
-                    self.socket.send(response)
-                    print(response)
                     print("")
 
-                # POST /v1/projects/archero-10b8d/installations HTTP/1.1
-                if "v1/projects/archero-10b8d/installations" in decodedData:
-                    response = b"""HTTP/2 200 OK
-                    Content-Type: application/json; charset=UTF-8
-                    Vary: Origin
-                    Vary: X-Origin
-                    Vary: Referer
-                    Date: Mon, 20 Feb 2023 23:29:37 GMT
-                    Server: ESF
-                    Cache-Control: private
-                    Content-Length: 630
-                    X-Xss-Protection: 0
-                    X-Frame-Options: SAMEORIGIN
-                    X-Content-Type-Options: nosniff
-                    Alt-Svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+                    decodedData = request_bytes.decode("utf-8", errors="replace")
 
-                    {
-                    "name": "projects/828268901162/installations/cxQTspArQ2m_Dl6OsvUfaF",
-                    "fid": "cxQTspArQ2m_Dl6OsvUfaF",
-                    "refreshToken": "3_AS3qfwJGYt8Al5oYk5R5GrOH5A_iVW4rDi-bTk28SYxQFGJL0jzjUIJ-pG_dYfqsd-2KAZxg03a2rI7o5BGyRYb5PsgDRkbBuBf-qUSSz1TwgJc",
-                    "authToken": {
-                        "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjE6ODI4MjY4OTAxMTYyOmFuZHJvaWQ6NzliODUyN2ViYzA1M2M2ODhiZTQ1MyIsImV4cCI6MTY3NzU0MDU3NywiZmlkIjoiY3hRVHNwQXJRMm1fRGw2T3N2VWZhRiIsInByb2plY3ROdW1iZXIiOjgyODI2ODkwMTE2Mn0.AB2LPV8wRQIhAOXLJ5-FXc0Vvj7qtFgSLcKLdAthMYPnhvGGpFJ4kibzAiBSd41HdzooTpUzpXK1C0XoY3c13Uw82ZJCDOc4Mhlv2Q",
-                        "expiresIn": "604800s"
-                    }
-                    }"""
-                    self.socket.send(response)
-                    print(
-                        "[+] API request: POST / v1/projects/archero-10b8d/installations"
-                    )
-                    print("[+] Response: " + response.decode())
+                    # Extract method + URL path (best-effort).
+                    method = ""
+                    path = ""
+                    try:
+                        parts = request_line.split(" ")
+                        if len(parts) >= 2:
+                            method = parts[0]
+                            path = parts[1]
+                    except Exception:
+                        method = ""
+                        path = ""
 
-                # GET / spi/v2/platforms/android/gmp/1: 828268901162: android: 79b8527ebc053c688be453/settings?instance = 7a16ca6d37f5b937c1687f86d66188f136bb999b & build_version = 1266 & display_version = 4.9.0 & source = 4
-                if "/spi/v2/platforms/android/gmp/" in decodedData:
-                    response = """HTTP/2 200 OK
-                    Content-Type: application/json; charset=utf-8
-                    X-Content-Type-Options: nosniff
-                    Cache-Control: no-cache, no-store, max-age=0, must-revalidate
-                    Pragma: no-cache
-                    Expires: Mon, 01 Jan 1990 00:00:00 GMT
-                    Date: Mon, 20 Feb 2023 23:29:37 GMT
-                    Cross-Origin-Opener-Policy: same-origin-allow-popups
-                    Server: ESF
-                    X-Xss-Protection: 0
-                    X-Frame-Options: SAMEORIGIN
-                    Alt-Svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+                    host = headers.get("Host", "")
+                    parsed_url = urllib.parse.urlsplit(path) if path else urllib.parse.SplitResult("", "", "", "", "")
+                    path_only = parsed_url.path or path
+                    query_params = urllib.parse.parse_qs(parsed_url.query or "")
 
-                    {"settings_version":3,"cache_duration":86400,"features":{"collect_logged_exceptions":true,"collect_reports":true,"collect_analytics":false,"prompt_enabled":false,"push_enabled":false,"firebase_crashlytics_enabled":false,"collect_anrs":true,"collect_metric_kit":false,"collect_build_ids":false},"app":{"status":"activated","update_required":false,"report_upload_variant":2,"native_report_upload_variant":2},"fabric":{"org_id":"628d0027632d9c0d02e2b976","bundle_id":"com.habby.archero"},"on_demand_upload_rate_per_minute":10.0,"on_demand_backoff_base":1.2,"on_demand_backoff_step_duration_seconds":60,"app_quality":{"sessions_enabled":true,"sampling_rate":1.0,"session_timeout_seconds":1800}}"""
-                    self.socket.send(response)
-                    print("[+] API request: /sync, responded back to client.")
-                    print("[+] Response: " + response.decode())
+                    if path_only == "/sandbox/config/profile":
+                        global ACTIVE_CONFIG_PROFILE
+                        # GET /sandbox/config/profile?name=foo -> switch profile
+                        name = ""
+                        if "name" in query_params and query_params["name"]:
+                            name = str(query_params["name"][0] or "").strip()
+                        if name:
+                            ACTIVE_CONFIG_PROFILE = name
+                        response = _json_response({"code": 0, "data": {"profile": ACTIVE_CONFIG_PROFILE}, "msg": ""})
+                        self.socket.sendall(response)
+                        print(f"[+] API request: {method} {path} host={host} -> config profile={ACTIVE_CONFIG_PROFILE!r}")
+                        continue
 
-                # POST /sync HTTP/1.1 (receiver.habby.mobi)
-                if "sync" in decodedData:
-                    response = b"""HTTP/2 200 OK
-                    Date: Mon, 20 Feb 2023 23:05:15 GMT
-                    Content-Type: application/json;charset=utf-8
-                    Content-Length: 10
+                    # Serve dumped config files from the sandbox server.
+                    if path_only.startswith("/data/config/") and path_only.lower().endswith(".json"):
+                        filename = path_only.split("/")[-1]
+                        cfg = load_config_json(filename, profile=ACTIVE_CONFIG_PROFILE or None)
+                        if cfg is None:
+                            # Many builds request a large set of optional config blobs.
+                            # Serve a valid JSON object rather than the default API wrapper,
+                            # so Unity's config loader doesn't fail JSON parsing.
+                            cfg = "{}"
+                            print(f"[!] Missing sandbox config {filename}; serving empty JSON object")
+                        payload = cfg.encode("utf-8")
+                        response = _http_response(
+                            "200 OK",
+                            {
+                                "Content-Type": "application/json; charset=UTF-8",
+                                "Cache-Control": "no-cache",
+                            },
+                            payload,
+                        )
+                        self.socket.sendall(response)
+                        print(
+                            f"[+] API request: {path} host={host}, served sandbox config {filename} ({len(payload)} bytes)"
+                        )
+                        continue
 
-                    {"code":0}\r\n\r\n"""
-                    self.socket.send(response)
-                    print("[+] API request: POST /sync (receiver.habby.mobi)")
-                    print("[+] Response: " + response.decode())
+                    content_type = (headers.get("Content-Type", "") or "").lower()
 
-                if "config?appid" in decodedData:
-                    response = b"""HTTP/2 200 OK
-                    Date: Mon, 20 Feb 2023 23:19:00 GMT
-                    Content-Type: application/json;charset=utf-8
-                    Content-Length: 69
+                    # Game gateway (UnityWebRequest + Habby* headers) uses an octet-stream payload.
+                    # For boot iteration, echoing the payload back often prevents the client from
+                    # choking on an unexpected JSON wrapper and allows it to proceed further.
+                    if (
+                        host == "game-archero-v1.archerosvc.com"
+                        and method == "PUT"
+                        and path_only == "/"
+                        and "application/octet-stream" in content_type
+                    ):
+                        response = _http_response(
+                            "200 OK",
+                            {
+                                "Content-Type": "application/octet-stream",
+                                "Cache-Control": "no-cache",
+                            },
+                            body,
+                        )
+                        self.socket.sendall(response)
+                        print(
+                            f"[GameGateway] API request: {method} {path} host={host} -> echo ({len(body)} bytes)"
+                        )
+                        continue
 
-                    {"code":0,"data":{"sync_batch_size":100,"sync_interval":60},"msg":""}\r\n\r\n"""
-                    self.socket.send(response)
-                    print(
-                        "[+] API request: /config?appid=xxxxx, responded back to client."
-                    )
-                    print("[+] Response: " + response.decode())
+                    # Mailbox / Habby mail service. We don't know full schemas yet; log clearly.
+                    if host.startswith("mail-") or "/mail" in path_only.lower():
+                        response = _json_response({"code": 0, "msg": "", "data": {"list": []}})
+                        self.socket.sendall(response)
+                        print(f"[Mailbox] API request: {method} {path} host={host} -> mail stub")
+                        continue
 
-                if "session" in decodedData:
-                    response = b"""HTTP/1.1 200 OK
-                    content-type: application/json; charset=utf-8
-                    date: Mon, 20 Feb 2023 23:29:42 GMT
-                    content-length: 84
-                    strict-transport-security: max-age=31536000; includeSubDomains; preload
-                    x-frame-options: SAMEORIGIN
-                    x-content-type-options: nosniff
-                    x-robots-tag: noindex
-                    connection: close
+                    # Minimal endpoints needed for bootstrapping.
+                    if re.match(r"^/users/\\d+/announcements", path_only):
+                        response = _json_response({"code": 0, "data": {"list": []}})
+                        self.socket.sendall(response)
+                        print(f"[Mailbox] API request: {method} {path} host={host} -> announcements")
+                        continue
 
-                    {"app_token":"be40xoovkp34","adid":"2e923d233df94bf905a4000937265a52","ask_in":5000}"""
-                    self.socket.send(response)
-                    print("[+] API request: POST app.adjust.com/session")
-                    print("[+] Response: " + response.decode())
+                    if path_only.startswith("/config"):
+                        # Let you iterate quickly: override with a JSON file or inline JSON, without code changes.
+                        override = _load_json_override(
+                            "ARCHERO_CONFIG_BOOTSTRAP_PATH", "ARCHERO_CONFIG_BOOTSTRAP_JSON"
+                        )
+                        if override is not None:
+                            self.socket.sendall(_json_response(override))
+                            print(f"[+] API request: {path} host={host} -> config bootstrap (override)")
+                            continue
+
+                        # Default minimal stub for requests that look like the real bootstrap call.
+                        if "appid" in query_params or "appid=" in path:
+                            response = _json_response(
+                                {
+                                    "code": 0,
+                                    "data": {"sync_batch_size": 100, "sync_interval": 60},
+                                    "msg": "",
+                                }
+                            )
+                            self.socket.sendall(response)
+                            print(f"[+] API request: {path} host={host} -> config bootstrap")
+                            continue
+
+                    if path_only == "/sandbox/player":
+                        p = load_player_profile()
+                        response = _json_response(
+                            {
+                                "code": 0,
+                                "data": {
+                                    "player": {
+                                        "player_id": p.player_id,
+                                        "player_name": p.player_name,
+                                        "level": p.level,
+                                        "chapter": p.chapter,
+                                        "coins": p.coins,
+                                        "gems": p.gems,
+                                        "exp": p.exp,
+                                        "talent": p.talent,
+                                        "character_id": p.character_id,
+                                    }
+                                },
+                            }
+                        )
+                        self.socket.sendall(response)
+                        print(f"[+] API request: {path} host={host} -> sandbox player")
+                        continue
+
+                    if path_only.endswith("/sync") or path_only.startswith("/sync"):
+                        # We don't know the full sync schema yet; return a stable "code:0"
+                        # plus our sandbox player snapshot so we can iterate from captures.
+                        p = load_player_profile()
+                        response = _json_response(
+                            {
+                                "code": 0,
+                                "data": {
+                                    "player": {
+                                        "player_id": p.player_id,
+                                        "player_name": p.player_name,
+                                        "level": p.level,
+                                        "chapter": p.chapter,
+                                        "coins": p.coins,
+                                        "gems": p.gems,
+                                        "exp": p.exp,
+                                        "talent": p.talent,
+                                        "character_id": p.character_id,
+                                    }
+                                },
+                                "msg": "",
+                            }
+                        )
+                        self.socket.sendall(response)
+                        print(f"[+] API request: {method} {path} host={host} -> sync stub")
+                        continue
+
+                    # Default: return a harmless OK so we can observe what the client does next.
+                    response = _json_response({"code": 0, "msg": "", "data": {}})
+                    self.socket.sendall(response)
+                    print(f"[+] API request: {method} {path} host={host} -> default stub")
+                    continue
 
 
 def onNewClient(
@@ -685,7 +787,10 @@ def loop(server_socket, port, isSSL):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.verify_mode = ssl.CERT_NONE
-        context.set_alpn_protocols(["h2", "http/1.1"])
+        alpn = ["http/1.1"]
+        if os.environ.get("ARCHERO_ENABLE_H2") == "1":
+            alpn.insert(0, "h2")
+        context.set_alpn_protocols(alpn)
         context.load_cert_chain(certfile=str(CERT_PATH), keyfile=str(KEY_PATH))
 
     def handle_client(client_socket, client_address):

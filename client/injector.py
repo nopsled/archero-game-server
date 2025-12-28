@@ -145,7 +145,7 @@ class AndroidInjector(Injector):
     """Frida injector for Android devices."""
 
     bundle_name = "com.habby.archero"
-    script_path = Path("client/android/agent.js")
+    script_path = Path("client/android/build/agent.js")
 
     def start(self) -> None:
         """Spawn the app and inject the script."""
@@ -199,7 +199,7 @@ class IOSInjector(Injector):
     """Frida injector for iOS devices."""
 
     bundle_name = "com.habby.archero.3Z58P8MNX4"
-    script_path = Path("client/ios/agent.js")
+    script_path = Path("client/ios/build/agent.js")
 
     def start(self) -> None:
         """Spawn the app and inject the script."""

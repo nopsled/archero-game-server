@@ -1,10 +1,10 @@
 /**
  * Network Discovery Mode
- * 
+ *
  * This is a simplified script focused on discovering all network connections
  * the game makes during startup. It captures ALL DNS lookups and connect() calls
  * without any filtering, and writes a summary after 60 seconds.
- * 
+ *
  * Usage: frida -U -l discovery.js -f com.habby.archero
  */
 
@@ -45,7 +45,7 @@ function now(): string {
 function logDns(hostname: string, ip: string, family: string) {
   const entry: ConnectionData = { timestamp: now(), type: "dns", hostname, ip, family };
   allConnections.push(entry);
-  
+
   let ips = dnsLookups.get(hostname);
   if (!ips) {
     ips = new Set();
@@ -58,9 +58,15 @@ function logDns(hostname: string, ip: string, family: string) {
 }
 
 function logConnect(ip: string, port: number, family: number) {
-  const entry: ConnectionData = { timestamp: now(), type: "connect", ip, port, family: family === 2 ? "ipv4" : "ipv6" };
+  const entry: ConnectionData = {
+    timestamp: now(),
+    type: "connect",
+    ip,
+    port,
+    family: family === 2 ? "ipv4" : "ipv6",
+  };
   allConnections.push(entry);
-  
+
   let ports = connections.get(ip);
   if (!ports) {
     ports = new Set();
@@ -86,7 +92,7 @@ function printSummary() {
   console.log("   NETWORK DISCOVERY SUMMARY");
   console.log("=".repeat(60));
   console.log(`Duration: ${elapsed.toFixed(1)}s | Total events: ${allConnections.length}`);
-  
+
   console.log("\n--- DNS Lookups (" + dnsLookups.size + " unique hosts) ---");
   const sortedHosts = [...dnsLookups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   for (const [hostname, ips] of sortedHosts) {
@@ -95,13 +101,13 @@ function printSummary() {
       console.log(`    -> ${ip}`);
     }
   }
-  
+
   console.log("\n--- Connections by IP (" + connections.size + " unique IPs) ---");
   const sortedConns = [...connections.entries()].sort((a, b) => {
     const portsA = [...a[1]];
     const portsB = [...b[1]];
     // Sort by most interesting ports first (12020, 443, etc.)
-    const hasGamePort = (ports: number[]) => ports.includes(12020) ? 0 : 1;
+    const hasGamePort = (ports: number[]) => (ports.includes(12020) ? 0 : 1);
     return hasGamePort(portsA) - hasGamePort(portsB) || a[0].localeCompare(b[0]);
   });
   for (const [ip, ports] of sortedConns) {
@@ -115,20 +121,20 @@ function printSummary() {
     const sortedPorts = [...ports].sort((a, b) => a - b);
     console.log(`  ${ip}${hostname}: [${sortedPorts.join(", ")}]`);
   }
-  
+
   console.log("\n--- Game-Related (likely) ---");
   const gameKeywords = ["habby", "archero", "game", "unity"];
   for (const hostname of dnsLookups.keys()) {
-    if (gameKeywords.some(kw => hostname.toLowerCase().includes(kw))) {
+    if (gameKeywords.some((kw) => hostname.toLowerCase().includes(kw))) {
       const ips = dnsLookups.get(hostname);
       const ipList = ips ? [...ips].join(", ") : "";
       console.log(`  ${hostname}: ${ipList}`);
     }
   }
-  
+
   console.log("\n--- Non-443 Ports (interesting) ---");
   for (const [ip, ports] of connections.entries()) {
-    const nonStd = [...ports].filter(p => p !== 443 && p !== 80);
+    const nonStd = [...ports].filter((p) => p !== 443 && p !== 80);
     if (nonStd.length > 0) {
       let hostname = "";
       for (const [host, ips] of dnsLookups.entries()) {
@@ -140,7 +146,7 @@ function printSummary() {
       console.log(`  ${ip}${hostname}: [${nonStd.join(", ")}]`);
     }
   }
-  
+
   console.log("=".repeat(60) + "\n");
 }
 
@@ -151,15 +157,20 @@ const ntohsPtr = Module.findExportByName(null, "ntohs");
 const ntohs = ntohsPtr ? new NativeFunction(ntohsPtr, "uint16", ["uint16"]) : null;
 
 if (getaddrinfoPtr) {
-  const getaddrinfoFn = new NativeFunction(getaddrinfoPtr, "int", ["pointer", "pointer", "pointer", "pointer"]);
-  
+  const getaddrinfoFn = new NativeFunction(getaddrinfoPtr, "int", [
+    "pointer",
+    "pointer",
+    "pointer",
+    "pointer",
+  ]);
+
   Interceptor.replace(
     getaddrinfoPtr,
     new NativeCallback(
       (name, service, hints, res) => {
         const hostname = name.readUtf8String() ?? "<null>";
         const result = getaddrinfoFn(name, service, hints, res) as number;
-        
+
         if (result === 0 && hostname !== "<null>") {
           try {
             const list = (res as NativePointer).readPointer();
@@ -169,7 +180,7 @@ if (getaddrinfoPtr) {
               while (!cur.isNull() && safety++ < 32) {
                 const family = cur.add(4).readS32();
                 const aiAddr = cur.add(24).readPointer();
-                
+
                 if (family === 2 /* AF_INET */ && !aiAddr.isNull()) {
                   const ipBytes = aiAddr.add(4);
                   const ip = `${ipBytes.readU8()}.${ipBytes.add(1).readU8()}.${ipBytes.add(2).readU8()}.${ipBytes.add(3).readU8()}`;
@@ -212,11 +223,11 @@ for (const ptr of connectPtrs) {
         const fd = args[0].toInt32();
         const addr = args[1] as NativePointer;
         if (addr.isNull()) return;
-        
+
         const family = addr.readU16();
         (this as any).fd = fd;
         (this as any).family = family;
-        
+
         if (family === 2 /* AF_INET */ && ntohs) {
           const port = (ntohs(addr.add(2).readU16()) as number) | 0;
           const ipBytes = addr.add(4);
@@ -248,6 +259,8 @@ setTimeout(() => {
 
 // Also print partial summary after 30 seconds
 setTimeout(() => {
-  console.log("\n[Discovery] 30s checkpoint - " + allConnections.length + " events captured so far");
+  console.log(
+    "\n[Discovery] 30s checkpoint - " + allConnections.length + " events captured so far"
+  );
   console.log("[Discovery] DNS hosts: " + dnsLookups.size + ", Unique IPs: " + connections.size);
 }, 30000);

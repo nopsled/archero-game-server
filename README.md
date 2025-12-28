@@ -112,6 +112,10 @@ bun install
 bun run build:android
 ```
 
+Note: `client/android/index.ts` currently enables local redirect by default (`REDIRECT_GAME_TLS=true`)
+so the Archero domains hit your sandbox server. If you want passive observation against real servers,
+set it to `false` and rebuild.
+
 ### 4) Run frida-server (if needed)
 
 If attach/spawn is unreliable, running `frida-server` inside the emulator is the most stable setup.
@@ -156,6 +160,28 @@ python3 tools/record_first_minute.py --device 127.0.0.1:26657 --duration 60
 python3 tools/summarize_session.py logs/sessions/session-*/ --json
 ```
 
+### Fast dev loop (server + reverse + inject)
+
+Use `tools/dev_run.py` to run the sandbox server and launch/inject the Android client together:
+
+```bash
+python3 tools/dev_run.py --device 127.0.0.1:26657 --restart-app --duration 90 --script client/android/agent_dev.js
+```
+
+Notes:
+- By default it runs the server on `:8443`, sets up `adb reverse` (`18443 -> 8443`, `12020 -> 12020`), and (on rooted emulators) installs the sandbox CA from `ARCHERO_CERT_DIR/ca.pem` into `/system/etc/security/cacerts/`.
+- Useful scripts:
+  - `client/android/agent_config.js`: redirect config/game hostnames to local sandbox (TLS).
+  - `client/android/agent_12020.js`: capture + decode the port `12020` stream.
+  - `client/android/agent_dev.js`: both of the above (redirect + 12020 capture).
+
+To focus on the first 30 seconds:
+
+```bash
+python3 tools/record_first_minute.py --device 127.0.0.1:26657 --duration 30
+python3 tools/summarize_session.py logs/sessions/session-*/ --window-seconds 30 --json
+```
+
 ### Changing the redirect IP
 
 The redirect is configured in `client/android/index.ts`. Default is `127.0.0.1` (meant for use with
@@ -171,9 +197,44 @@ The redirect is configured in `client/android/index.ts`. Default is `127.0.0.1` 
 | `ARCHERO_CERT_DIR` | auto                | Override cert output dir (default auto-select).     |
 | `ARCHERO_PKILL_PYTHON` | unset/`0`        | Set to `1` to run `pkill python` on startup.        |
 | `ARCHERO_LOG_PEEK` | unset/`0`            | Set to `1` to log first bytes before TLS wrap.      |
+| `ARCHERO_ENABLE_H2` | unset/`0`           | Set to `1` to advertise ALPN `h2` (default prefers `http/1.1`). |
+| `ARCHERO_CONFIG_OVERRIDE_DIR` | unset     | Directory of config JSON overrides (e.g. `game_config.json`) served for `/data/config/*.json`. |
+| `ARCHERO_PLAYER_PROFILE_PATH` | unset     | JSON file used for the port `12020` login response (player id/name/level/etc). |
+| `ARCHERO_PLAYER_PROFILE_JSON` | unset     | Inline JSON alternative to `ARCHERO_PLAYER_PROFILE_PATH`. |
 | `CAPTURE_ENABLED`  | `true` (agent)        | Enables socket capture logs in `capture.log`.       |
 | `ENABLE_NATIVE_TLS_BYPASS` | `true` (agent) | Best-effort native TLS verify bypass.               |
 | `ENABLE_NATIVE_TLS_LOGGER` | `true` (agent) | Logs TLS plaintext for watched hostnames (best-effort). |
+
+### Customizing the sandbox player
+
+Create a JSON file and point the server at it:
+
+```json
+{
+  "player_id": 123,
+  "player_name": "Sandbox",
+  "level": 50,
+  "chapter": 10,
+  "coins": 999999,
+  "gems": 9999,
+  "exp": 4242,
+  "talent": 0
+}
+```
+
+Run:
+
+```bash
+ARCHERO_PLAYER_PROFILE_PATH=/path/to/player_profile.json uv run server
+```
+
+### Overriding `/data/config/*.json`
+
+Put any of the known config filenames (e.g. `game_config.json`) into a directory and set:
+
+```bash
+ARCHERO_CONFIG_OVERRIDE_DIR=/path/to/overrides uv run server
+```
 
 ---
 

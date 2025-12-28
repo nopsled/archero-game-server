@@ -31,7 +31,9 @@ function findExport(exportName: string): NativePointer | null {
   const findExportByName =
     typeof moduleApi.findExportByName === "function" ? moduleApi.findExportByName : null;
   const findGlobalExportByName =
-    typeof moduleApi.findGlobalExportByName === "function" ? moduleApi.findGlobalExportByName : null;
+    typeof moduleApi.findGlobalExportByName === "function"
+      ? moduleApi.findGlobalExportByName
+      : null;
 
   if (findExportByName) {
     const direct = findExportByName(null, exportName);
@@ -115,7 +117,8 @@ function findHostInAscii(hostAllowlist: string[], ascii: string): string | null 
 function getFdFromJavaFileDescriptor(fdObj: any): number | null {
   if (!fdObj) return null;
   try {
-    if (fdObj.descriptor && typeof fdObj.descriptor.value === "number") return fdObj.descriptor.value | 0;
+    if (fdObj.descriptor && typeof fdObj.descriptor.value === "number")
+      return fdObj.descriptor.value | 0;
   } catch {
     // ignore
   }
@@ -159,8 +162,8 @@ function enableJavaTlsLogger(hostAllowlist: string[], maxBytes: number) {
 
               const byteIdx = args.findIndex((a) => a && a.$className === "[B");
               const byteArray = byteIdx >= 0 ? args[byteIdx] : null;
-              const offset = byteIdx >= 0 ? (args[byteIdx + 1] | 0) : 0;
-              const len = byteIdx >= 0 ? (args[byteIdx + 2] | 0) : 0;
+              const offset = byteIdx >= 0 ? args[byteIdx + 1] | 0 : 0;
+              const len = byteIdx >= 0 ? args[byteIdx + 2] | 0 : 0;
 
               if (byteArray && len > 0) {
                 const preview = previewJavaByteArray(byteArray, offset, len, maxBytes);
@@ -168,7 +171,10 @@ function enableJavaTlsLogger(hostAllowlist: string[], maxBytes: number) {
 
                 const trackedHost = fd != null ? Patcher.GetTrackedHost(fd) : null;
                 const detectedHost = findHostInAscii(hostAllowlist, preview.ascii);
-                const host = trackedHost ?? (fd != null ? observedHostByFd.get(fd) ?? null : null) ?? detectedHost;
+                const host =
+                  trackedHost ??
+                  (fd != null ? (observedHostByFd.get(fd) ?? null) : null) ??
+                  detectedHost;
 
                 if (!host) return overload.call(this, ...args);
                 if (fd != null && detectedHost) observedHostByFd.set(fd, detectedHost);
@@ -191,11 +197,11 @@ function enableJavaTlsLogger(hostAllowlist: string[], maxBytes: number) {
             const fdObj = args.find((a) => a && a.$className === "java.io.FileDescriptor");
             const fd = getFdFromJavaFileDescriptor(fdObj);
             const trackedHost = fd != null ? Patcher.GetTrackedHost(fd) : null;
-            const host = trackedHost ?? (fd != null ? observedHostByFd.get(fd) ?? null : null);
+            const host = trackedHost ?? (fd != null ? (observedHostByFd.get(fd) ?? null) : null);
 
             const byteIdx = args.findIndex((a) => a && a.$className === "[B");
             const byteArray = byteIdx >= 0 ? args[byteIdx] : null;
-            const offset = byteIdx >= 0 ? (args[byteIdx + 1] | 0) : 0;
+            const offset = byteIdx >= 0 ? args[byteIdx + 1] | 0 : 0;
 
             const rv = overload.call(this, ...args) as number;
             try {
@@ -229,7 +235,9 @@ function enableJavaTlsLogger(hostAllowlist: string[], maxBytes: number) {
 
 export class NativeTlsLogger {
   static enable(hostAllowlist: string[], maxBytes = 1024): boolean {
-    console.log(`[${now()}] [NativeTlsLogger] enable(hostAllowlist=${hostAllowlist.length}, maxBytes=${maxBytes})`);
+    console.log(
+      `[${now()}] [NativeTlsLogger] enable(hostAllowlist=${hostAllowlist.length}, maxBytes=${maxBytes})`
+    );
 
     const sslSetSniPtr = findExport("SSL_set_tlsext_host_name");
     const sslSet1HostPtr = findExport("SSL_set1_host");
@@ -290,7 +298,12 @@ export class NativeTlsLogger {
       });
     }
 
-    const logWrite = (dir: "write" | "read", sslPtr: NativePointer, buf: NativePointer, len: number) => {
+    const logWrite = (
+      dir: "write" | "read",
+      sslPtr: NativePointer,
+      buf: NativePointer,
+      len: number
+    ) => {
       const host = sslPtrToHost.get(sslPtr.toString());
       if (!host) return;
       let fd: number | null = null;
@@ -299,7 +312,9 @@ export class NativeTlsLogger {
       } catch {
         fd = null;
       }
-      console.log(`[${now()}] [NativeTlsLogger] SSL_${dir} host="${host}" fd=${fd ?? "?"} len=${len} ${dump(buf, len, maxBytes)}`);
+      console.log(
+        `[${now()}] [NativeTlsLogger] SSL_${dir} host="${host}" fd=${fd ?? "?"} len=${len} ${dump(buf, len, maxBytes)}`
+      );
     };
 
     Interceptor.attach(sslWritePtr, {
@@ -308,7 +323,12 @@ export class NativeTlsLogger {
         this.buf = args[1];
         this.len = args[2].toInt32();
         try {
-          logWrite("write", this.ssl as NativePointer, this.buf as NativePointer, this.len as number);
+          logWrite(
+            "write",
+            this.ssl as NativePointer,
+            this.buf as NativePointer,
+            this.len as number
+          );
         } catch {
           // ignore
         }

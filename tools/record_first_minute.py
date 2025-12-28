@@ -72,6 +72,11 @@ def main() -> int:
         help="directory to store session logs",
     )
     parser.add_argument(
+        "--injector-script",
+        default="client/android/agent.js",
+        help="Frida script path to inject (e.g. client/android/agent_12020.js)",
+    )
+    parser.add_argument(
         "--no-server",
         action="store_true",
         help="do not start/stop the server (only run injector + adb reverse)",
@@ -142,6 +147,8 @@ def main() -> int:
             "--restart",
             "--device",
             args.device,
+            "--script",
+            str(args.injector_script),
             "--logfile",
             str(paths.capture_log),
         ],

@@ -71,6 +71,11 @@ const readvPtr = findAnyExport(["readv", "__readv"]);
 const sendmsgPtr = findAnyExport(["sendmsg", "__sendmsg"]);
 const recvmsgPtr = findAnyExport(["recvmsg", "__recvmsg"]);
 const syscallPtr = findAnyExport(["syscall", "__syscall"]);
+const socketPtr = findAnyExport(["socket", "__socket"]);
+const closePtr = findAnyExport(["close", "__close"]);
+const shutdownPtr = findAnyExport(["shutdown", "__shutdown"]);
+const getsockoptPtr = findAnyExport(["getsockopt", "__getsockopt"]);
+const pollPtr = findAnyExport(["poll", "__poll"]);
 const ntohsPtr = findAnyExport(["ntohs"]);
 const inet_addrPtr = findAnyExport(["inet_addr"]);
 const errnoFnPtr = findAnyExport(["__errno", "__errno_location"]);
@@ -90,7 +95,9 @@ console.log(
     sendmsgPtr
   )} recvmsg=${ptrInfo(recvmsgPtr)} syscall=${ptrInfo(
     syscallPtr
-  )} ntohs=${ptrInfo(
+  )} socket=${ptrInfo(socketPtr)} close=${ptrInfo(closePtr)} shutdown=${ptrInfo(
+    shutdownPtr
+  )} getsockopt=${ptrInfo(getsockoptPtr)} poll=${ptrInfo(pollPtr)} ntohs=${ptrInfo(
     ntohsPtr
   )} inet_addr=${ptrInfo(inet_addrPtr)} errno_fn=${ptrInfo(errnoFnPtr)}`
 );
@@ -98,6 +105,7 @@ console.log(
 const trackedSockets = new Set<number>();
 let trafficHooksInstalled = false;
 let connectHookInstalled = false;
+let lifecycleHooksInstalled = false;
 let sendHookInstalled = false;
 let recvHookInstalled = false;
 let sendtoHookInstalled = false;
@@ -113,6 +121,11 @@ let readvHookInstalled = false;
 let sendmsgHookInstalled = false;
 let recvmsgHookInstalled = false;
 let syscallHookInstalled = false;
+let socketHookInstalled = false;
+let closeHookInstalled = false;
+let shutdownHookInstalled = false;
+let getsockoptHookInstalled = false;
+let pollHookInstalled = false;
 let connectDebug = false;
 
 type SocketMeta = {
@@ -123,10 +136,14 @@ type SocketMeta = {
   patchedIp?: string;
   patchedPort?: number;
   allowlistedHost?: string;
+  sockDomain?: number;
+  sockType?: number;
+  sockProtocol?: number;
   ts?: string;
 };
 
 const socketMeta = new Map<number, SocketMeta>();
+const pendingConnect = new Map<number, { ts: string; ip?: string; port?: number }>();
 
 const seenHostnames = new Set<string>();
 const hostnamesByIpv4 = new Map<string, Set<string>>();
@@ -143,6 +160,12 @@ type CaptureConfig = {
   emitMessages: boolean;
   captureReadWrite: boolean;
   captureSyscalls: boolean;
+  decodeEnabled: boolean;
+  decodePorts: number[] | null;
+  decodeMaxChunkBytes: number;
+  decodeMaxFrameBytes: number;
+  decodeMaxFramesPerSocket: number;
+  decodeLogPayloadBytes: number;
 };
 
 let captureConfig: CaptureConfig = {
@@ -155,6 +178,12 @@ let captureConfig: CaptureConfig = {
   emitMessages: false,
   captureReadWrite: true,
   captureSyscalls: true,
+  decodeEnabled: false,
+  decodePorts: [12020],
+  decodeMaxChunkBytes: 65536,
+  decodeMaxFrameBytes: 256 * 1024,
+  decodeMaxFramesPerSocket: 50,
+  decodeLogPayloadBytes: 256,
 };
 
 type TlsRemapConfig = {
@@ -201,6 +230,184 @@ function shouldEmitForFd(fd: number) {
   return false;
 }
 
+type DecodeDir = "c2s" | "s2c";
+type DecodeMode = "unknown" | "tls" | "lengthpref";
+type DecodeState = { mode: DecodeMode; buffer: Uint8Array; frames: number };
+
+const decodeStateByKey = new Map<string, DecodeState>();
+
+function decodeKey(fd: number, dir: DecodeDir) {
+  return `${fd}:${dir}`;
+}
+
+function effectivePort(meta: SocketMeta | undefined) {
+  return meta?.patchedPort ?? meta?.port;
+}
+
+function u16le(b: Uint8Array, off: number) {
+  return (b[off] | (b[off + 1] << 8)) & 0xffff;
+}
+
+function u32le(b: Uint8Array, off: number) {
+  return (b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24)) >>> 0;
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array) {
+  if (a.length === 0) return b;
+  if (b.length === 0) return a;
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+function maybeDecodePortStream(fd: number, dir: DecodeDir, chunk: Uint8Array) {
+  if (!captureConfig.enabled || !captureConfig.decodeEnabled) return;
+  if (chunk.length === 0) return;
+
+  const meta = socketMeta.get(fd);
+  const port = effectivePort(meta);
+  if (port == null) return;
+  if (captureConfig.decodePorts && !captureConfig.decodePorts.includes(port)) return;
+
+  const key = decodeKey(fd, dir);
+  const prev =
+    decodeStateByKey.get(key) ??
+    ({ mode: "unknown", buffer: new Uint8Array(0), frames: 0 } satisfies DecodeState);
+  const merged = concatBytes(prev.buffer, chunk);
+
+  // Prevent unbounded growth if the stream isn't parseable.
+  if (merged.length > captureConfig.decodeMaxFrameBytes * 2) {
+    decodeStateByKey.set(key, {
+      mode: "unknown",
+      buffer: chunk.slice(0, captureConfig.decodeMaxFrameBytes),
+      frames: prev.frames,
+    });
+    console.log(
+      `[${Utilities.now()}] [proto] fd=${fd} dir=${dir} port=${port} reset-buffer reason=overflow size=${merged.length}`
+    );
+    return;
+  }
+
+  const state: DecodeState = { ...prev, buffer: merged };
+
+  if (state.mode === "unknown") {
+    if (state.buffer.length >= 3 && state.buffer[0] === 0x16 && state.buffer[1] === 0x03) {
+      state.mode = "tls";
+      const previewLen = Math.min(state.buffer.length, 64);
+      console.log(
+        `[${Utilities.now()}] [proto] fd=${fd} dir=${dir} port=${port} detected=tls ${Utilities.dump(
+          state.buffer.slice(0, previewLen).buffer,
+          previewLen
+        )}`
+      );
+    } else if (state.buffer.length >= 4) {
+      const b0 = state.buffer[0];
+      const b1 = state.buffer[1];
+      const b2 = state.buffer[2];
+      const b3 = state.buffer[3];
+      const looksHttp =
+        (b0 === 0x47 && b1 === 0x45 && b2 === 0x54 && b3 === 0x20) || // "GET "
+        (b0 === 0x50 && b1 === 0x4f && b2 === 0x53 && b3 === 0x54) || // "POST"
+        (b0 === 0x48 && b1 === 0x54 && b2 === 0x54 && b3 === 0x50); // "HTTP"
+      if (looksHttp) {
+        const previewLen = Math.min(state.buffer.length, 256);
+        console.log(
+          `[${Utilities.now()}] [proto] fd=${fd} dir=${dir} port=${port} detected=http ${Utilities.dump(
+            state.buffer.slice(0, previewLen).buffer,
+            previewLen
+          )}`
+        );
+      } else {
+        state.mode = "lengthpref";
+      }
+    }
+  }
+
+  if (state.mode !== "lengthpref") {
+    decodeStateByKey.set(key, state);
+    return;
+  }
+
+  while (state.frames < captureConfig.decodeMaxFramesPerSocket && state.buffer.length >= 4) {
+    const frameLen = u32le(state.buffer, 0);
+    if (frameLen < 2 || frameLen > captureConfig.decodeMaxFrameBytes) {
+      console.log(
+        `[${Utilities.now()}] [proto] fd=${fd} dir=${dir} port=${port} invalid-frame-len=${frameLen} buffer=${state.buffer.length} (giving up)`
+      );
+      state.mode = "unknown";
+      break;
+    }
+    if (state.buffer.length < 4 + frameLen) break;
+
+    const msgType = u16le(state.buffer, 4);
+    const payload = state.buffer.slice(6, 4 + frameLen);
+    const logLen = Math.min(payload.length, captureConfig.decodeLogPayloadBytes);
+    const payloadPreview = payload.slice(0, logLen);
+
+    console.log(
+      `[${Utilities.now()}] [proto] fd=${fd} dir=${dir} port=${port} frameLen=${frameLen} msg=0x${msgType
+        .toString(16)
+        .padStart(
+          4,
+          "0"
+        )} payloadLen=${payload.length} ${Utilities.dump(payloadPreview.buffer, logLen)}`
+    );
+
+    // Best-effort parse of a common login-like payload layout.
+    try {
+      if (payload.length >= 6) {
+        let off = 0;
+        const platform =
+          payload[off] |
+          (payload[off + 1] << 8) |
+          (payload[off + 2] << 16) |
+          (payload[off + 3] << 24) |
+          0;
+        off += 4;
+
+        const readStr = () => {
+          if (off + 2 > payload.length) return null;
+          const n = u16le(payload, off);
+          off += 2;
+          if (off + n > payload.length) return null;
+          const s = new TextDecoder("utf-8", { fatal: false }).decode(payload.slice(off, off + n));
+          off += n;
+          return s;
+        };
+
+        const version = readStr();
+        const deviceId = readStr();
+        const language = readStr();
+        if (version != null && deviceId != null && language != null && off + 8 <= payload.length) {
+          const lo = u32le(payload, off);
+          const hi = u32le(payload, off + 4);
+          off += 8;
+          const userId =
+            hi === 0 ? String(lo) : `${hi.toString(16)}${lo.toString(16).padStart(8, "0")}`;
+          const token = readStr();
+          if (token != null) {
+            console.log(
+              `[${Utilities.now()}] [proto] fd=${fd} dir=${dir} port=${port} guess=login platform=${platform} version=${JSON.stringify(
+                version
+              )} deviceId=${JSON.stringify(deviceId)} lang=${JSON.stringify(language)} userId=${JSON.stringify(
+                userId
+              )} tokenLen=${token.length}`
+            );
+          }
+        }
+      }
+    } catch {
+      // ignore parse failures
+    }
+
+    state.frames += 1;
+    state.buffer = state.buffer.slice(4 + frameLen);
+  }
+
+  decodeStateByKey.set(key, state);
+}
+
 const getaddrinfoFunction =
   getaddrinfoPtr != null
     ? new NativeFunction(getaddrinfoPtr, "int", ["pointer", "pointer", "pointer", "pointer"])
@@ -239,15 +446,45 @@ function errnoName(code: number) {
   switch (code) {
     case 11:
       return "EAGAIN";
+    case 32:
+      return "EPIPE";
+    case 101:
+      return "ENETUNREACH";
+    case 103:
+      return "ECONNABORTED";
+    case 104:
+      return "ECONNRESET";
+    case 106:
+      return "EISCONN";
     case 111:
       return "ECONNREFUSED";
+    case 114:
+      return "EALREADY";
     case 113:
       return "EHOSTUNREACH";
     case 115:
       return "EINPROGRESS";
+    case 107:
+      return "ENOTCONN";
+    case 110:
+      return "ETIMEDOUT";
     default:
       return `errno_${code}`;
   }
+}
+
+function updateSocketMeta(fd: number, patch: SocketMeta) {
+  const prev = socketMeta.get(fd) ?? {};
+  socketMeta.set(fd, { ...prev, ...patch });
+}
+
+function errnoSuffix(errno: number | null) {
+  if (errno == null || errno === 0) return "";
+  return ` (${errnoName(errno)})`;
+}
+
+function shouldLogLifecycle(fd: number) {
+  return socketMeta.has(fd) || trackedSockets.has(fd) || pendingConnect.has(fd);
 }
 
 function readSizeT(pointer: NativePointer): number {
@@ -372,27 +609,16 @@ export class Patcher {
       enabled: config.enabled ?? true,
     };
 
-    if (captureConfig.enabled && !trafficHooksInstalled) {
-      trafficHooksInstalled = true;
+    if (captureConfig.enabled) {
+      // Always (re)attempt installation; each Patch* has its own idempotent guard.
+      Patcher.PatchLifecycleDiagnostics(false);
       Patcher.PatchSend(false, false);
       Patcher.PatchRecv(false, false);
       if (captureConfig.captureReadWrite) {
-        Patcher.PatchSendto(false);
-        Patcher.PatchRecvfrom(false);
         Patcher.PatchWrite(false, false);
         Patcher.PatchRead(false, false);
-        Patcher.PatchWriteChk(false);
-        Patcher.PatchReadChk(false);
-        Patcher.PatchSendtoChk(false);
-        Patcher.PatchRecvfromChk(false);
-        Patcher.PatchWritev(false);
-        Patcher.PatchReadv(false);
-        Patcher.PatchSendmsg(false);
-        Patcher.PatchRecvmsg(false);
       }
-      if (captureConfig.captureSyscalls) {
-        Patcher.PatchSyscalls(false);
-      }
+      if (captureConfig.captureSyscalls) Patcher.PatchSyscalls(false);
     }
 
     console.log(
@@ -400,6 +626,25 @@ export class Patcher {
         captureConfig.ports
       )} maxBytes=${captureConfig.maxBytes} emitMessages=${captureConfig.emitMessages} captureReadWrite=${captureConfig.captureReadWrite} captureSyscalls=${captureConfig.captureSyscalls}`
     );
+  }
+
+  public static PatchLifecycleDiagnostics(isDebugging = false) {
+    if (!lifecycleHooksInstalled) {
+      lifecycleHooksInstalled = true;
+      Patcher.PatchSocket(isDebugging);
+      Patcher.PatchClose(isDebugging);
+      Patcher.PatchShutdown(isDebugging);
+      Patcher.PatchGetsockopt(isDebugging);
+    } else {
+      // If diagnostics were enabled earlier without debug, still ensure we attach anything
+      // that is only installed in debug mode.
+      Patcher.PatchSocket(isDebugging);
+      Patcher.PatchClose(isDebugging);
+      Patcher.PatchShutdown(isDebugging);
+      Patcher.PatchGetsockopt(isDebugging);
+    }
+    // poll() is very hot; only attach it in debug mode.
+    if (isDebugging) Patcher.PatchPoll(isDebugging);
   }
 
   public static PatchGadp(addrInfo: string) {
@@ -468,34 +713,33 @@ export class Patcher {
               if (Process.pointerSize !== 8) {
                 // Not implemented for 32-bit.
               } else {
-
-              // struct addrinfo layout (bionic 64-bit)
-              const ai_family_off = 4;
-              const ai_addr_off = 24; // after 5 ints + padding
-              const ai_next_off = 40;
-              let cur = listPtr;
-              let safety = 0;
-              while (!cur.isNull() && safety++ < 32) {
-                const ai_family = cur.add(ai_family_off).readS32();
-                if (ai_family === 2 /* AF_INET */) {
-                  const ai_addr = cur.add(ai_addr_off).readPointer();
-                  if (!ai_addr.isNull()) {
-                    const ipPtr = ai_addr.add(4);
-                    const ip = Utilities.readIpv4String(ipPtr);
-                    addIpv4Host(ip, nameStr);
-                    ips.push(ip);
+                // struct addrinfo layout (bionic 64-bit)
+                const ai_family_off = 4;
+                const ai_addr_off = 24; // after 5 ints + padding
+                const ai_next_off = 40;
+                let cur = listPtr;
+                let safety = 0;
+                while (!cur.isNull() && safety++ < 32) {
+                  const ai_family = cur.add(ai_family_off).readS32();
+                  if (ai_family === 2 /* AF_INET */) {
+                    const ai_addr = cur.add(ai_addr_off).readPointer();
+                    if (!ai_addr.isNull()) {
+                      const ipPtr = ai_addr.add(4);
+                      const ip = Utilities.readIpv4String(ipPtr);
+                      addIpv4Host(ip, nameStr);
+                      ips.push(ip);
+                    }
+                  } else if (ai_family === 10 /* AF_INET6 */) {
+                    const ai_addr = cur.add(ai_addr_off).readPointer();
+                    if (!ai_addr.isNull()) {
+                      const ip6Ptr = ai_addr.add(8);
+                      const ip6 = Utilities.readIpv6String(ip6Ptr);
+                      addIpv6Host(ip6, nameStr);
+                      ips.push(ip6);
+                    }
                   }
-                } else if (ai_family === 10 /* AF_INET6 */) {
-                  const ai_addr = cur.add(ai_addr_off).readPointer();
-                  if (!ai_addr.isNull()) {
-                    const ip6Ptr = ai_addr.add(8);
-                    const ip6 = Utilities.readIpv6String(ip6Ptr);
-                    addIpv6Host(ip6, nameStr);
-                    ips.push(ip6);
-                  }
+                  cur = cur.add(ai_next_off).readPointer();
                 }
-                cur = cur.add(ai_next_off).readPointer();
-              }
               }
             } catch {
               // ignore parse failures
@@ -529,7 +773,9 @@ export class Patcher {
               );
             } else if (!seenHostnames.has(nameStr)) {
               seenHostnames.add(nameStr);
-              console.log(`[${Utilities.now()}] getaddrinfo allowlisted host="${nameStr}" -> "${newIp}"`);
+              console.log(
+                `[${Utilities.now()}] getaddrinfo allowlisted host="${nameStr}" -> "${newIp}"`
+              );
             }
             // (actual resolution already done above)
             return result;
@@ -564,6 +810,7 @@ export class Patcher {
 
     if (connectDebug && !trafficHooksInstalled) {
       trafficHooksInstalled = true;
+      Patcher.PatchLifecycleDiagnostics(true);
       Patcher.PatchSend(true, true);
       Patcher.PatchRecv(true, true);
     }
@@ -586,11 +833,11 @@ export class Patcher {
             const family = address.readU16();
             (this as any).family = family;
 
-            socketMeta.set(fd, { family, ts: Utilities.now() });
+            updateSocketMeta(fd, { family, ts: Utilities.now() });
 
             const trackWithHost = (ip: string, port: number, host: string, reason?: string) => {
               trackedSockets.add(fd);
-              socketMeta.set(fd, {
+              updateSocketMeta(fd, {
                 family,
                 ip,
                 port,
@@ -617,8 +864,19 @@ export class Patcher {
               const port = (ntohs(portPtr.readU16()) as number) | 0;
               const originalIp = Utilities.readIpv4String(ipPtr);
               const resolvedHosts = getHostsForIpv4(originalIp);
+              const logPort =
+                captureConfig.enabled &&
+                captureConfig.ports != null &&
+                captureConfig.ports.includes(port);
+              (this as any).logPort = logPort;
 
-              socketMeta.set(fd, { family, ip: originalIp, port, patched: false, ts: Utilities.now() });
+              updateSocketMeta(fd, {
+                family,
+                ip: originalIp,
+                port,
+                patched: false,
+                ts: Utilities.now(),
+              });
 
               if (resolvedHosts.length > 0) {
                 trackWithHost(originalIp, port, resolvedHosts[0]);
@@ -627,11 +885,15 @@ export class Patcher {
               }
 
               // TLS remap (default 127.0.0.2:443 -> 127.0.0.1:18443) for allowlisted DNS results.
-              if (tlsRemap.enabled && port === tlsRemap.fromPort && originalIp === tlsRemap.matchIp) {
+              if (
+                tlsRemap.enabled &&
+                port === tlsRemap.fromPort &&
+                originalIp === tlsRemap.matchIp
+              ) {
                 ipPtr.writeInt(inet_addr(Memory.allocUtf8String(tlsRemap.targetIp)) as number);
                 portPtr.writeU16(swap16(tlsRemap.toPort));
                 trackedSockets.add(fd);
-                socketMeta.set(fd, {
+                updateSocketMeta(fd, {
                   family,
                   ip: originalIp,
                   port,
@@ -650,7 +912,7 @@ export class Patcher {
               if (ports.includes(port)) {
                 ipPtr.writeInt(inet_addr(Memory.allocUtf8String(newIP)) as number);
                 trackedSockets.add(fd);
-                socketMeta.set(fd, {
+                updateSocketMeta(fd, {
                   family,
                   ip: originalIp,
                   port,
@@ -664,8 +926,10 @@ export class Patcher {
                     `[${Utilities.now()}] connect(fd=${fd}) ${originalIp}:${port} -> ${newIP}:${port} (patched)`
                   );
                 }
-              } else if (connectDebug) {
-                console.log(`[${Utilities.now()}] connect(fd=${fd}) ${originalIp}:${port} len=${addressLen}`);
+              } else if (connectDebug || logPort) {
+                console.log(
+                  `[${Utilities.now()}] connect(fd=${fd}) ${originalIp}:${port} len=${addressLen}`
+                );
               }
             } else if (family === 10 /* AF_INET6 */) {
               const portPtr = address.add(2);
@@ -673,8 +937,19 @@ export class Patcher {
               const ip6Ptr = address.add(8);
               const originalIp6 = Utilities.readIpv6String(ip6Ptr);
               const resolvedHosts = getHostsForIpv6(originalIp6);
+              const logPort =
+                captureConfig.enabled &&
+                captureConfig.ports != null &&
+                captureConfig.ports.includes(port);
+              (this as any).logPort = logPort;
 
-              socketMeta.set(fd, { family, ip: originalIp6, port, patched: false, ts: Utilities.now() });
+              updateSocketMeta(fd, {
+                family,
+                ip: originalIp6,
+                port,
+                patched: false,
+                ts: Utilities.now(),
+              });
 
               if (resolvedHosts.length > 0) {
                 trackWithHost(originalIp6, port, resolvedHosts[0]);
@@ -682,31 +957,40 @@ export class Patcher {
                 tryTidFallback(originalIp6, port);
               }
 
-              if (connectDebug) {
-                console.log(`[${Utilities.now()}] connect(fd=${fd}) ${originalIp6}:${port} len=${addressLen}`);
+              if (connectDebug || logPort) {
+                console.log(
+                  `[${Utilities.now()}] connect(fd=${fd}) ${originalIp6}:${port} len=${addressLen}`
+                );
               }
             } else if (connectDebug) {
-              console.log(`[${Utilities.now()}] connect(fd=${fd}) family=${family} len=${addressLen}`);
+              console.log(
+                `[${Utilities.now()}] connect(fd=${fd}) family=${family} len=${addressLen}`
+              );
             }
           } catch (err) {
-            if (connectDebug) console.log(`[${Utilities.now()}] connect hook error: ${String(err)}`);
+            if (connectDebug)
+              console.log(`[${Utilities.now()}] connect hook error: ${String(err)}`);
           }
         },
         onLeave(retval) {
           const fd = (this as any).fd as number;
           const result = retval.toInt32();
+          const errno = result === -1 ? readErrno() : null;
+          const logPort = Boolean((this as any).logPort);
 
-          if (connectDebug) {
+          if (connectDebug || logPort) {
             if (result === -1) {
-              const e = readErrno();
-              if (e != null) {
-                console.log(`[${Utilities.now()}] connect(fd=${fd}) => -1 (${errnoName(e)})`);
-              } else {
-                console.log(`[${Utilities.now()}] connect(fd=${fd}) => -1`);
-              }
+              console.log(`[${Utilities.now()}] connect(fd=${fd}) => -1${errnoSuffix(errno)}`);
             } else {
               console.log(`[${Utilities.now()}] connect(fd=${fd}) => ${result}`);
             }
+          }
+
+          if (errno === 115 /* EINPROGRESS */ || errno === 114 /* EALREADY */) {
+            const meta = socketMeta.get(fd);
+            pendingConnect.set(fd, { ts: Utilities.now(), ip: meta?.ip, port: meta?.port });
+          } else if (result === 0) {
+            pendingConnect.delete(fd);
           }
 
           if (captureConfig.enabled && captureConfig.emitMessages && shouldEmitForFd(fd)) {
@@ -716,7 +1000,7 @@ export class Patcher {
               ts: Utilities.now(),
               fd,
               result,
-              errno: result === -1 ? readErrno() : null,
+              errno,
               meta,
             });
           }
@@ -742,6 +1026,7 @@ export class Patcher {
       new NativeCallback(
         (fd, buf, len, flags) => {
           const result = sendFunction(fd, buf, len, flags) as number;
+          const errno = result === -1 ? readErrno() : null;
           const meta = socketMeta.get(fd);
           const shouldEmit = shouldEmitForFd(fd);
 
@@ -754,7 +1039,10 @@ export class Patcher {
                   "send",
                   [fd, `len=${len}`, `flags=${flags}`],
                   result
-                )} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(buffer, snippetLen)}`
+                )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(
+                  buffer,
+                  snippetLen
+                )}`
               );
             }
           }
@@ -775,6 +1063,13 @@ export class Patcher {
               },
               (buffer ?? (new ArrayBuffer(0) as ArrayBuffer)) as ArrayBuffer
             );
+          }
+
+          if (shouldEmit && captureConfig.decodeEnabled && result > 0) {
+            const sent = Math.min(result, len);
+            const decodeLen = Math.min(sent, captureConfig.decodeMaxChunkBytes);
+            const decodeBuffer = buf.readByteArray(decodeLen) as ArrayBuffer | null;
+            if (decodeBuffer) maybeDecodePortStream(fd, "c2s", new Uint8Array(decodeBuffer));
           }
           return result;
         },
@@ -801,6 +1096,7 @@ export class Patcher {
       new NativeCallback(
         (fd, buf, len, flags) => {
           const result = recvFunction(fd, buf, len, flags) as number;
+          const errno = result === -1 ? readErrno() : null;
           const meta = socketMeta.get(fd);
           const shouldEmit = shouldEmitForFd(fd);
 
@@ -821,7 +1117,7 @@ export class Patcher {
                   "recv",
                   [fd, `len=${len}`, `flags=${flags}`],
                   result
-                )} meta=${JSON.stringify(meta ?? {})}`
+                )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})}`
               );
             }
           }
@@ -842,6 +1138,12 @@ export class Patcher {
               },
               (buffer ?? (new ArrayBuffer(0) as ArrayBuffer)) as ArrayBuffer
             );
+          }
+
+          if (shouldEmit && captureConfig.decodeEnabled && result > 0) {
+            const decodeLen = Math.min(result, captureConfig.decodeMaxChunkBytes);
+            const decodeBuffer = buf.readByteArray(decodeLen) as ArrayBuffer | null;
+            if (decodeBuffer) maybeDecodePortStream(fd, "s2c", new Uint8Array(decodeBuffer));
           }
           return result;
         },
@@ -871,6 +1173,7 @@ export class Patcher {
         const len = this.len as number;
         const flags = this.flags as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
         if (!shouldEmit || !captureConfig.emitConsole) return;
@@ -882,7 +1185,10 @@ export class Patcher {
             "sendto",
             [fd, `len=${len}`, `flags=${flags}`],
             result
-          )} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(buffer, snippetLen)}`
+          )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(
+            buffer,
+            snippetLen
+          )}`
         );
       },
     });
@@ -890,8 +1196,7 @@ export class Patcher {
 
   public static PatchRecvfrom(isDebugging = false) {
     if (recvfromPtr == null) {
-      if (isDebugging)
-        console.log(`[${Utilities.now()}] recvfrom export not found; skipping hook`);
+      if (isDebugging) console.log(`[${Utilities.now()}] recvfrom export not found; skipping hook`);
       return;
     }
     if (recvfromHookInstalled) return;
@@ -908,13 +1213,16 @@ export class Patcher {
         const fd = this.fd as number;
         const flags = this.flags as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
         if (!shouldEmit || !captureConfig.emitConsole) return;
 
         if (result > 0) {
           const snippetLen = Math.min(result, captureConfig.maxBytes);
-          const buffer = (this.buf as NativePointer).readByteArray(snippetLen) as ArrayBuffer | null;
+          const buffer = (this.buf as NativePointer).readByteArray(
+            snippetLen
+          ) as ArrayBuffer | null;
           console.log(
             `[${Utilities.now()}] ${Utilities.formatFunction(
               "recvfrom",
@@ -928,7 +1236,7 @@ export class Patcher {
               "recvfrom",
               [fd, `len=${this.len}`, `flags=${flags}`],
               result
-            )} meta=${JSON.stringify(meta ?? {})}`
+            )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})}`
           );
         }
       },
@@ -949,6 +1257,7 @@ export class Patcher {
       new NativeCallback(
         (fd, buf, len) => {
           const result = writeFunction(fd, buf, len) as number;
+          const errno = result === -1 ? readErrno() : null;
           const meta = socketMeta.get(fd);
           const shouldEmit = shouldEmitForFd(fd);
 
@@ -960,7 +1269,10 @@ export class Patcher {
                 "write",
                 [fd, `len=${len}`],
                 result
-              )} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(buffer, snippetLen)}`
+              )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(
+                buffer,
+                snippetLen
+              )}`
             );
           }
 
@@ -979,6 +1291,13 @@ export class Patcher {
               },
               (buffer ?? (new ArrayBuffer(0) as ArrayBuffer)) as ArrayBuffer
             );
+          }
+
+          if (shouldEmit && captureConfig.decodeEnabled && result > 0) {
+            const written = Math.min(result, len);
+            const decodeLen = Math.min(written, captureConfig.decodeMaxChunkBytes);
+            const decodeBuffer = buf.readByteArray(decodeLen) as ArrayBuffer | null;
+            if (decodeBuffer) maybeDecodePortStream(fd, "c2s", new Uint8Array(decodeBuffer));
           }
 
           return result;
@@ -1003,6 +1322,7 @@ export class Patcher {
       new NativeCallback(
         (fd, buf, len) => {
           const result = readFunction(fd, buf, len) as number;
+          const errno = result === -1 ? readErrno() : null;
           const meta = socketMeta.get(fd);
           const shouldEmit = shouldEmitForFd(fd);
 
@@ -1023,7 +1343,7 @@ export class Patcher {
                   "read",
                   [fd, `len=${len}`],
                   result
-                )} meta=${JSON.stringify(meta ?? {})}`
+                )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})}`
               );
             }
           }
@@ -1043,6 +1363,12 @@ export class Patcher {
               },
               (buffer ?? (new ArrayBuffer(0) as ArrayBuffer)) as ArrayBuffer
             );
+          }
+
+          if (shouldEmit && captureConfig.decodeEnabled && result > 0) {
+            const decodeLen = Math.min(result, captureConfig.decodeMaxChunkBytes);
+            const decodeBuffer = buf.readByteArray(decodeLen) as ArrayBuffer | null;
+            if (decodeBuffer) maybeDecodePortStream(fd, "s2c", new Uint8Array(decodeBuffer));
           }
 
           return result;
@@ -1071,18 +1397,24 @@ export class Patcher {
         const fd = this.fd as number;
         const len = this.len as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
 
         if (shouldEmit && captureConfig.emitConsole) {
           const snippetLen = Math.min(len, captureConfig.maxBytes);
-          const buffer = (this.buf as NativePointer).readByteArray(snippetLen) as ArrayBuffer | null;
+          const buffer = (this.buf as NativePointer).readByteArray(
+            snippetLen
+          ) as ArrayBuffer | null;
           console.log(
             `[${Utilities.now()}] ${Utilities.formatFunction(
               "__write_chk",
               [fd, `len=${len}`],
               result
-            )} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(buffer, snippetLen)}`
+            )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(
+              buffer,
+              snippetLen
+            )}`
           );
         }
       },
@@ -1106,13 +1438,16 @@ export class Patcher {
       onLeave(retval) {
         const fd = this.fd as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
 
         if (shouldEmit && captureConfig.emitConsole) {
           if (result > 0) {
             const snippetLen = Math.min(result, captureConfig.maxBytes);
-            const buffer = (this.buf as NativePointer).readByteArray(snippetLen) as ArrayBuffer | null;
+            const buffer = (this.buf as NativePointer).readByteArray(
+              snippetLen
+            ) as ArrayBuffer | null;
             console.log(
               `[${Utilities.now()}] ${Utilities.formatFunction(
                 "__read_chk",
@@ -1126,7 +1461,7 @@ export class Patcher {
                 "__read_chk",
                 [fd, `len=${this.len}`],
                 result
-              )} meta=${JSON.stringify(meta ?? {})}`
+              )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})}`
             );
           }
         }
@@ -1154,18 +1489,24 @@ export class Patcher {
         const len = this.len as number;
         const flags = this.flags as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
 
         if (shouldEmit && captureConfig.emitConsole) {
           const snippetLen = Math.min(len, captureConfig.maxBytes);
-          const buffer = (this.buf as NativePointer).readByteArray(snippetLen) as ArrayBuffer | null;
+          const buffer = (this.buf as NativePointer).readByteArray(
+            snippetLen
+          ) as ArrayBuffer | null;
           console.log(
             `[${Utilities.now()}] ${Utilities.formatFunction(
               "__sendto_chk",
               [fd, `len=${len}`, `flags=${flags}`],
               result
-            )} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(buffer, snippetLen)}`
+            )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(
+              buffer,
+              snippetLen
+            )}`
           );
         }
       },
@@ -1192,13 +1533,16 @@ export class Patcher {
         const fd = this.fd as number;
         const result = retval.toInt32();
         const flags = this.flags as number;
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
 
         if (shouldEmit && captureConfig.emitConsole) {
           if (result > 0) {
             const snippetLen = Math.min(result, captureConfig.maxBytes);
-            const buffer = (this.buf as NativePointer).readByteArray(snippetLen) as ArrayBuffer | null;
+            const buffer = (this.buf as NativePointer).readByteArray(
+              snippetLen
+            ) as ArrayBuffer | null;
             console.log(
               `[${Utilities.now()}] ${Utilities.formatFunction(
                 "__recvfrom_chk",
@@ -1212,7 +1556,7 @@ export class Patcher {
                 "__recvfrom_chk",
                 [fd, `len=${this.len}`, `flags=${flags}`],
                 result
-              )} meta=${JSON.stringify(meta ?? {})}`
+              )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})}`
             );
           }
         }
@@ -1239,6 +1583,7 @@ export class Patcher {
         const iov = this.iov as NativePointer;
         const iovcnt = this.iovcnt as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
 
@@ -1262,7 +1607,10 @@ export class Patcher {
             "writev",
             [fd, `iovcnt=${iovcnt}`, `first_len=${len}`],
             result
-          )} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(buffer, snippetLen)}`
+          )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(
+            buffer,
+            snippetLen
+          )}`
         );
       },
     });
@@ -1287,6 +1635,7 @@ export class Patcher {
         const iov = this.iov as NativePointer;
         const iovcnt = this.iovcnt as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
 
@@ -1309,7 +1658,10 @@ export class Patcher {
             "readv",
             [fd, `iovcnt=${iovcnt}`, `first_len=${len}`],
             result
-          )} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(buffer, snippetLen)}`
+          )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(
+            buffer,
+            snippetLen
+          )}`
         );
       },
     });
@@ -1334,6 +1686,7 @@ export class Patcher {
         const msg = this.msg as NativePointer;
         const flags = this.flags as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
         if (!shouldEmit || !captureConfig.emitConsole) return;
@@ -1372,7 +1725,10 @@ export class Patcher {
             "sendmsg",
             [fd, `iovlen=${iovlen}`, `first_len=${len}`, `flags=${flags}`],
             result
-          )} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(buffer, snippetLen)}`
+          )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})} ${Utilities.dump(
+            buffer,
+            snippetLen
+          )}`
         );
       },
     });
@@ -1397,6 +1753,7 @@ export class Patcher {
         const msg = this.msg as NativePointer;
         const flags = this.flags as number;
         const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
         const meta = socketMeta.get(fd);
         const shouldEmit = shouldEmitForFd(fd);
         if (!shouldEmit || !captureConfig.emitConsole) return;
@@ -1444,9 +1801,263 @@ export class Patcher {
               "recvmsg",
               [fd, `iovlen=${iovlen}`, `flags=${flags}`],
               result
-            )} meta=${JSON.stringify(meta ?? {})}`
+            )}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(meta ?? {})}`
           );
         }
+      },
+    });
+  }
+
+  public static PatchSocket(isDebugging = false) {
+    if (socketPtr == null) {
+      if (isDebugging) console.log(`[${Utilities.now()}] socket export not found; skipping hook`);
+      return;
+    }
+    if (socketHookInstalled) return;
+    socketHookInstalled = true;
+
+    Interceptor.attach(socketPtr, {
+      onEnter(args) {
+        this.domain = args[0].toInt32();
+        this.type = args[1].toInt32();
+        this.protocol = args[2].toInt32();
+      },
+      onLeave(retval) {
+        const fd = retval.toInt32();
+        const domain = this.domain as number;
+        const type = this.type as number;
+        const protocol = this.protocol as number;
+        const errno = fd === -1 ? readErrno() : null;
+
+        if (fd >= 0) {
+          updateSocketMeta(fd, {
+            sockDomain: domain,
+            sockType: type,
+            sockProtocol: protocol,
+            ts: Utilities.now(),
+          });
+        }
+
+        if (isDebugging) {
+          console.log(
+            `[${Utilities.now()}] socket(domain=${domain}, type=${type}, protocol=${protocol}) -> ${fd}${fd === -1 ? errnoSuffix(errno) : ""}`
+          );
+        }
+      },
+    });
+  }
+
+  public static PatchClose(isDebugging = false) {
+    if (closePtr == null) {
+      if (isDebugging) console.log(`[${Utilities.now()}] close export not found; skipping hook`);
+      return;
+    }
+    if (closeHookInstalled) return;
+    closeHookInstalled = true;
+
+    Interceptor.attach(closePtr, {
+      onEnter(args) {
+        this.fd = args[0].toInt32();
+      },
+      onLeave(retval) {
+        const fd = this.fd as number;
+        const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
+        const meta = socketMeta.get(fd);
+
+        if (isDebugging || shouldLogLifecycle(fd)) {
+          console.log(
+            `[${Utilities.now()}] close(${fd}) -> ${result}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(
+              meta ?? {}
+            )}`
+          );
+        }
+
+        if (result === 0) {
+          trackedSockets.delete(fd);
+          socketMeta.delete(fd);
+          pendingConnect.delete(fd);
+        }
+      },
+    });
+  }
+
+  public static PatchShutdown(isDebugging = false) {
+    if (shutdownPtr == null) {
+      if (isDebugging) console.log(`[${Utilities.now()}] shutdown export not found; skipping hook`);
+      return;
+    }
+    if (shutdownHookInstalled) return;
+    shutdownHookInstalled = true;
+
+    Interceptor.attach(shutdownPtr, {
+      onEnter(args) {
+        this.fd = args[0].toInt32();
+        this.how = args[1].toInt32();
+      },
+      onLeave(retval) {
+        const fd = this.fd as number;
+        const how = this.how as number;
+        const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
+        const meta = socketMeta.get(fd);
+
+        if (isDebugging || shouldLogLifecycle(fd)) {
+          console.log(
+            `[${Utilities.now()}] shutdown(${fd}, how=${how}) -> ${result}${result === -1 ? errnoSuffix(errno) : ""} meta=${JSON.stringify(
+              meta ?? {}
+            )}`
+          );
+        }
+      },
+    });
+  }
+
+  public static PatchGetsockopt(isDebugging = false) {
+    if (getsockoptPtr == null) {
+      if (isDebugging)
+        console.log(`[${Utilities.now()}] getsockopt export not found; skipping hook`);
+      return;
+    }
+    if (getsockoptHookInstalled) return;
+    getsockoptHookInstalled = true;
+
+    // Linux constants
+    const SOL_SOCKET = 1;
+    const SO_ERROR = 4;
+
+    Interceptor.attach(getsockoptPtr, {
+      onEnter(args) {
+        this.fd = args[0].toInt32();
+        this.level = args[1].toInt32();
+        this.optname = args[2].toInt32();
+        this.optval = args[3] as NativePointer;
+        this.optlen = args[4] as NativePointer;
+      },
+      onLeave(retval) {
+        const fd = this.fd as number;
+        const level = this.level as number;
+        const optname = this.optname as number;
+        const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
+
+        if (level !== SOL_SOCKET || optname !== SO_ERROR) return;
+        if (!shouldLogLifecycle(fd) && !isDebugging) return;
+
+        let soError: number | null = null;
+        try {
+          const optval = this.optval as NativePointer;
+          if (!optval.isNull()) soError = optval.readS32();
+        } catch {
+          soError = null;
+        }
+
+        const meta = socketMeta.get(fd);
+        console.log(
+          `[${Utilities.now()}] getsockopt(fd=${fd}, SO_ERROR) -> ${result}${result === -1 ? errnoSuffix(errno) : ""} so_error=${soError ?? "null"}${soError != null ? errnoSuffix(soError) : ""} meta=${JSON.stringify(
+            meta ?? {}
+          )}`
+        );
+
+        // If an async connect was pending, SO_ERROR is the definitive outcome.
+        if (pendingConnect.has(fd) && soError != null) {
+          pendingConnect.delete(fd);
+        }
+      },
+    });
+  }
+
+  public static PatchPoll(isDebugging = false) {
+    if (pollPtr == null) {
+      if (isDebugging) console.log(`[${Utilities.now()}] poll export not found; skipping hook`);
+      return;
+    }
+    if (pollHookInstalled) return;
+    pollHookInstalled = true;
+
+    // struct pollfd { int fd; short events; short revents; } (8 bytes)
+    const stride = 8;
+    const POLLIN = 0x0001;
+    const POLLOUT = 0x0004;
+    const POLLERR = 0x0008;
+    const POLLHUP = 0x0010;
+    const POLLNVAL = 0x0020;
+
+    const describeEvents = (mask: number) => {
+      const out: string[] = [];
+      if (mask & POLLIN) out.push("IN");
+      if (mask & POLLOUT) out.push("OUT");
+      if (mask & POLLERR) out.push("ERR");
+      if (mask & POLLHUP) out.push("HUP");
+      if (mask & POLLNVAL) out.push("NVAL");
+      return out.length ? out.join("|") : "0";
+    };
+
+    Interceptor.attach(pollPtr, {
+      onEnter(args) {
+        const fds = args[0] as NativePointer;
+        const nfds = args[1].toInt32();
+        const timeout = args[2].toInt32();
+
+        this.fds = fds;
+        this.nfds = nfds;
+        this.timeout = timeout;
+
+        if (fds.isNull() || nfds <= 0) {
+          this.matches = [];
+          return;
+        }
+
+        const matches: number[] = [];
+        const limit = Math.min(nfds, 256);
+        for (let i = 0; i < limit; i++) {
+          try {
+            const fd = fds.add(i * stride).readS32();
+            if (pendingConnect.has(fd)) matches.push(i);
+          } catch {
+            break;
+          }
+        }
+        this.matches = matches;
+      },
+      onLeave(retval) {
+        const matches = (this.matches as number[]) ?? [];
+        if (matches.length === 0) return;
+
+        const fds = this.fds as NativePointer;
+        const nfds = this.nfds as number;
+        const timeout = this.timeout as number;
+        const result = retval.toInt32();
+        const errno = result === -1 ? readErrno() : null;
+
+        const details: Array<{
+          fd: number;
+          events: string;
+          revents: string;
+          meta: SocketMeta | undefined;
+        }> = [];
+        for (const i of matches) {
+          try {
+            const base = fds.add(i * stride);
+            const fd = base.readS32();
+            const events = base.add(4).readS16() & 0xffff;
+            const revents = base.add(6).readS16() & 0xffff;
+            details.push({
+              fd,
+              events: describeEvents(events),
+              revents: describeEvents(revents),
+              meta: socketMeta.get(fd),
+            });
+          } catch {
+            // ignore
+          }
+        }
+
+        console.log(
+          `[${Utilities.now()}] poll(nfds=${nfds}, timeout=${timeout}) -> ${result}${result === -1 ? errnoSuffix(errno) : ""} pending=${JSON.stringify(
+            details
+          )}`
+        );
       },
     });
   }
@@ -1479,7 +2090,13 @@ export class Patcher {
       onEnter(args) {
         const nr = args[0].toInt32();
         this.nr = nr;
-        if (nr !== NR_READ && nr !== NR_WRITE && nr !== NR_CONNECT && nr !== NR_SENDTO && nr !== NR_RECVFROM) {
+        if (
+          nr !== NR_READ &&
+          nr !== NR_WRITE &&
+          nr !== NR_CONNECT &&
+          nr !== NR_SENDTO &&
+          nr !== NR_RECVFROM
+        ) {
           this.skip = true;
           return;
         }
@@ -1517,7 +2134,9 @@ export class Patcher {
         if (nr === NR_WRITE || nr === NR_SENDTO) {
           const len = this.len as number;
           const snippetLen = Math.min(len, captureConfig.maxBytes);
-          const buffer = (this.buf as NativePointer).readByteArray(snippetLen) as ArrayBuffer | null;
+          const buffer = (this.buf as NativePointer).readByteArray(
+            snippetLen
+          ) as ArrayBuffer | null;
           console.log(
             `[${Utilities.now()}] ${Utilities.formatFunction(
               name,
@@ -1528,7 +2147,9 @@ export class Patcher {
         } else if (nr === NR_READ || nr === NR_RECVFROM) {
           if (result > 0) {
             const snippetLen = Math.min(result, captureConfig.maxBytes);
-            const buffer = (this.buf as NativePointer).readByteArray(snippetLen) as ArrayBuffer | null;
+            const buffer = (this.buf as NativePointer).readByteArray(
+              snippetLen
+            ) as ArrayBuffer | null;
             console.log(
               `[${Utilities.now()}] ${Utilities.formatFunction(
                 name,

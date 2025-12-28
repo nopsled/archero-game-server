@@ -200,3 +200,5 @@ __pycache__/
 .ruff_cache/
 client/android/agent.js
 client/android/discovery.js
+
+node_modules

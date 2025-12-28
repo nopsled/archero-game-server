@@ -5,6 +5,7 @@ Processes CUserLoginPacket and returns player profile data.
 
 from __future__ import annotations
 
+from ..config.player_profile import load_player_profile
 from ..protocol import (
     Packet,
     MessageType,
@@ -33,18 +34,19 @@ def handle_login(packet: Packet) -> Packet | None:
           f"device_id={request.device_id[:20] if request.device_id else 'N/A'}..., "
           f"user_id={request.user_id}")
     
-    # Create mock profile response
-    # In a real implementation, this would query a database
+    profile = load_player_profile()
+
+    # Create sandbox profile response (configurable via env/file).
     response = UserLoginResponse(
         result_code=0,  # Success
-        player_id=170722380,
-        player_name="Player 170722380",
-        coins=199,
-        gems=120,
-        level=1,
-        chapter=1,
-        exp=100,
-        talent=0,
+        player_id=profile.player_id,
+        player_name=profile.player_name,
+        coins=profile.coins,
+        gems=profile.gems,
+        level=profile.level,
+        chapter=profile.chapter,
+        exp=profile.exp,
+        talent=profile.talent,
     )
     
     response_packet = response.to_packet()
