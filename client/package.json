@@ -23,6 +23,7 @@
     "build:discovery": "frida-compile -o android/build/discovery.js android/discovery.ts",
     "build:mail-discovery": "frida-compile -o android/build/mail_discovery.js android/mail_discovery.ts",
     "build:hotupdate-discovery": "frida-compile -o android/build/hotupdate_discovery.js android/hotupdate_discovery.ts",
+    "build:protocol-discovery": "frida-compile -o android/build/protocol_discovery.js android/protocol_discovery.ts",
     "watch:ios": "frida-compile -o ios/build/agent.js -w ios/index.ts",
     "watch:android": "frida-compile -o android/build/agent.js -w android/index.ts",
     "inject:android": "cd .. && /Library/Developer/CommandLineTools/usr/bin/python3 client/injector.py android",

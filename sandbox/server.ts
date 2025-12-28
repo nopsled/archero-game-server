@@ -1,7 +1,9 @@
 /**
  * Archero Sandbox Server
  *
- * A barebones implementation of the Archero game server protocol.
+ * Implementation of the Archero game server protocol.
+ * - HTTP API on port 8080 (for config, static data)
+ * - TCP Binary Protocol on port 12020 (for game communication)
  *
  * Run: bun run dev
  */
@@ -9,6 +11,15 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import * as crypto from "crypto";
+import * as net from "net";
+
+import {
+  BinaryReader,
+  BinaryWriter,
+  readCUserLoginPacket,
+  writeCRespUserLoginPacket,
+  createDefaultLoginResponse,
+} from "./protocol";
 
 const app = new Hono();
 
@@ -18,6 +29,10 @@ const app = new Hono();
 
 const ENCRYPTION_KEY = "4ptjerlkgjlk34jylkej4rgklj4klyj";
 const API_KEY = "A63B6DBE18D84CA29887198B4ACBDEE9";
+
+// Message types (from game analysis)
+const MSG_TYPE_USER_LOGIN = 0x0001;
+const MSG_TYPE_USER_LOGIN_RESP = 0x0002;
 
 // =============================================================================
 // ENCRYPTION HELPERS
@@ -85,7 +100,108 @@ function verifyRequest(
 }
 
 // =============================================================================
-// MIDDLEWARE
+// BINARY PROTOCOL HANDLER
+// =============================================================================
+
+interface Packet {
+  msgType: number;
+  payload: Buffer;
+}
+
+function parsePacket(data: Buffer): { packet: Packet; remaining: Buffer } | null {
+  if (data.length < 4) return null;
+
+  const length = data.readUInt32LE(0);
+  if (data.length < 4 + length) return null;
+
+  const msgType = data.readUInt16LE(4);
+  const payload = data.subarray(6, 4 + length);
+  const remaining = data.subarray(4 + length);
+
+  return { packet: { msgType, payload }, remaining };
+}
+
+function createPacket(msgType: number, payload: Buffer): Buffer {
+  const length = 2 + payload.length;
+  const header = Buffer.alloc(6);
+  header.writeUInt32LE(length, 0);
+  header.writeUInt16LE(msgType, 4);
+  return Buffer.concat([header, payload]);
+}
+
+function handlePacket(packet: Packet): Buffer | null {
+  console.log(`[TCP] Received message type 0x${packet.msgType.toString(16).padStart(4, '0')} (${packet.payload.length} bytes)`);
+
+  switch (packet.msgType) {
+    case MSG_TYPE_USER_LOGIN: {
+      try {
+        const reader = new BinaryReader(packet.payload);
+        const loginReq = readCUserLoginPacket(reader);
+        console.log(`[TCP] Login request: transId=${loginReq.m_nTransID}, platform="${loginReq.m_strPlatform}"`);
+
+        // Create login response
+        const loginResp = createDefaultLoginResponse(loginReq.m_nTransID);
+        const writer = new BinaryWriter();
+        writeCRespUserLoginPacket(writer, loginResp);
+
+        return createPacket(MSG_TYPE_USER_LOGIN_RESP, Buffer.from(writer.toBytes()));
+      } catch (e) {
+        console.error(`[TCP] Failed to handle login: ${e}`);
+        return null;
+      }
+    }
+
+    default:
+      console.log(`[TCP] Unhandled message type: 0x${packet.msgType.toString(16).padStart(4, '0')}`);
+      console.log(`[TCP] Payload hex: ${packet.payload.toString('hex').substring(0, 100)}...`);
+      return null;
+  }
+}
+
+// =============================================================================
+// TCP SERVER (Binary Protocol)
+// =============================================================================
+
+const TCP_PORT = 12020;
+
+const tcpServer = net.createServer((socket) => {
+  console.log(`[TCP] Client connected from ${socket.remoteAddress}:${socket.remotePort}`);
+
+  let buffer = Buffer.alloc(0);
+
+  socket.on("data", (data) => {
+    buffer = Buffer.concat([buffer, data]);
+    console.log(`[TCP] Received ${data.length} bytes (buffer: ${buffer.length} bytes)`);
+
+    // Try to parse complete packets
+    let result;
+    while ((result = parsePacket(buffer)) !== null) {
+      const { packet, remaining } = result;
+      buffer = remaining;
+
+      const response = handlePacket(packet);
+      if (response) {
+        socket.write(response);
+        console.log(`[TCP] Sent response: ${response.length} bytes`);
+      }
+    }
+  });
+
+  socket.on("close", () => {
+    console.log(`[TCP] Client disconnected`);
+  });
+
+  socket.on("error", (err) => {
+    console.error(`[TCP] Socket error: ${err.message}`);
+  });
+});
+
+tcpServer.listen(TCP_PORT, () => {
+  console.log(`[TCP] Binary protocol server listening on port ${TCP_PORT}`);
+});
+
+// =============================================================================
+// HTTP MIDDLEWARE
 // =============================================================================
 
 app.use("*", logger());
@@ -94,12 +210,12 @@ app.use("*", logger());
 app.use("*", async (c, next) => {
   const habbyType = c.req.header("HabbyType");
   const habbyVersion = c.req.header("HabbyVersion");
-  console.log(`[Sandbox] HabbyType=${habbyType} HabbyVersion=${habbyVersion}`);
+  console.log(`[HTTP] HabbyType=${habbyType} HabbyVersion=${habbyVersion}`);
   await next();
 });
 
 // =============================================================================
-// ROUTES
+// HTTP ROUTES
 // =============================================================================
 
 // Health check
@@ -116,7 +232,7 @@ app.put("/", async (c) => {
 
   // Get raw body
   const body = Buffer.from(await c.req.arrayBuffer());
-  console.log(`[Sandbox] Request body (${body.length} bytes)`);
+  console.log(`[HTTP] Request body (${body.length} bytes)`);
 
   // Verify signature (optional - disable for testing)
   const VERIFY_SIGNATURES = false;
@@ -153,7 +269,7 @@ app.put("/", async (c) => {
 // Config file endpoints
 app.get("/data/config/:filename", (c) => {
   const filename = c.req.param("filename");
-  console.log(`[Sandbox] Config request: ${filename}`);
+  console.log(`[HTTP] Config request: ${filename}`);
 
   // Return minimal valid config
   let config: object;
@@ -178,19 +294,21 @@ app.get("/data/config/:filename", (c) => {
 });
 
 // =============================================================================
-// START SERVER
+// START HTTP SERVER
 // =============================================================================
 
-const PORT = 8080;
+const HTTP_PORT = 8080;
 
 console.log(`
 ╔═══════════════════════════════════════════╗
 ║     Archero Sandbox Server                ║
-║     http://localhost:${PORT}                  ║
+╠═══════════════════════════════════════════╣
+║     HTTP API:  http://localhost:${HTTP_PORT}      ║
+║     TCP Game:  tcp://localhost:${TCP_PORT}     ║
 ╚═══════════════════════════════════════════╝
 `);
 
 export default {
-  port: PORT,
+  port: HTTP_PORT,
   fetch: app.fetch,
 };
