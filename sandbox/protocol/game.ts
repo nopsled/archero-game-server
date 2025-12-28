@@ -1,20 +1,20 @@
 /**
  * Game Protocol Packets
- * 
+ *
  * Core gameplay structures: towers, battles, harvests, achievements, etc.
  */
 
-import { BinaryReader, BinaryWriter } from "./binary";
-import { CCommonRespMsg, writeCCommonRespMsg, createSuccessResponse } from "./common";
+import type { BinaryReader, BinaryWriter } from "./binary";
+import { type CCommonRespMsg, writeCCommonRespMsg } from "./common";
 
 // =============================================================================
 // GAME TOWER
 // =============================================================================
 
 export interface CGameTowerInfo {
-  m_nType: number;              // UInt16
-  m_bWin: boolean;              // Boolean
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_bWin: boolean; // Boolean
+  m_nTransID: number; // UInt32
 }
 
 export function readCGameTowerInfo(reader: BinaryReader): CGameTowerInfo {
@@ -26,10 +26,10 @@ export function readCGameTowerInfo(reader: BinaryReader): CGameTowerInfo {
 }
 
 export interface CPlayTowerInfo {
-  m_nType: number;              // UInt16
-  m_nTowerId: number;           // UInt32
-  m_nFloor: number;             // UInt16
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nTowerId: number; // UInt32
+  m_nFloor: number; // UInt16
+  m_nTransID: number; // UInt32
 }
 
 export function readCPlayTowerInfo(reader: BinaryReader): CPlayTowerInfo {
@@ -43,8 +43,8 @@ export function readCPlayTowerInfo(reader: BinaryReader): CPlayTowerInfo {
 
 export interface CRespGameTowerInfo {
   m_stRetMsg: CCommonRespMsg;
-  m_nFloor: number;             // UInt16
-  m_nMaxFloor: number;          // UInt16
+  m_nFloor: number; // UInt16
+  m_nMaxFloor: number; // UInt16
 }
 
 export function writeCRespGameTowerInfo(writer: BinaryWriter, resp: CRespGameTowerInfo): void {
@@ -55,8 +55,8 @@ export function writeCRespGameTowerInfo(writer: BinaryWriter, resp: CRespGameTow
 
 export interface CRespPlayTowerInfo {
   m_stRetMsg: CCommonRespMsg;
-  m_nTowerId: number;           // UInt32
-  m_nFloor: number;             // UInt16
+  m_nTowerId: number; // UInt32
+  m_nFloor: number; // UInt16
 }
 
 export function writeCRespPlayTowerInfo(writer: BinaryWriter, resp: CRespPlayTowerInfo): void {
@@ -70,8 +70,8 @@ export function writeCRespPlayTowerInfo(writer: BinaryWriter, resp: CRespPlayTow
 // =============================================================================
 
 export interface CReqGameHarvest2 {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
 }
 
 export function readCReqGameHarvest2(reader: BinaryReader): CReqGameHarvest2 {
@@ -83,10 +83,10 @@ export function readCReqGameHarvest2(reader: BinaryReader): CReqGameHarvest2 {
 
 export interface CRespGameHarvest2 {
   m_stRetMsg: CCommonRespMsg;
-  m_nCoins: number;             // UInt32
-  m_nExp: number;               // UInt32
-  m_nTimestamp: bigint;         // UInt64
-  m_nMaxTime: number;           // UInt32
+  m_nCoins: number; // UInt32
+  m_nExp: number; // UInt32
+  m_nTimestamp: bigint; // UInt64
+  m_nMaxTime: number; // UInt32
 }
 
 export function writeCRespGameHarvest2(writer: BinaryWriter, resp: CRespGameHarvest2): void {
@@ -102,9 +102,9 @@ export function writeCRespGameHarvest2(writer: BinaryWriter, resp: CRespGameHarv
 // =============================================================================
 
 export interface CGameAchieveInfo {
-  m_nType: number;              // UInt16
-  m_nId: number;                // UInt32
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nId: number; // UInt32
+  m_nTransID: number; // UInt32
 }
 
 export function readCGameAchieveInfo(reader: BinaryReader): CGameAchieveInfo {
@@ -116,13 +116,16 @@ export function readCGameAchieveInfo(reader: BinaryReader): CGameAchieveInfo {
 }
 
 export interface STCommonAchievementData {
-  m_nId: number;                // UInt32
-  m_nProgress: number;          // UInt32
-  m_nLevel: number;             // UInt16
-  m_bIsClaimed: boolean;        // Boolean
+  m_nId: number; // UInt32
+  m_nProgress: number; // UInt32
+  m_nLevel: number; // UInt16
+  m_bIsClaimed: boolean; // Boolean
 }
 
-export function writeSTCommonAchievementData(writer: BinaryWriter, data: STCommonAchievementData): void {
+export function writeSTCommonAchievementData(
+  writer: BinaryWriter,
+  data: STCommonAchievementData,
+): void {
   writer.writeUInt32(data.m_nId);
   writer.writeUInt32(data.m_nProgress);
   writer.writeUInt16(data.m_nLevel);
@@ -144,9 +147,9 @@ export function writeCRespGameAchieveInfo(writer: BinaryWriter, resp: CRespGameA
 // =============================================================================
 
 export interface CGameAd {
-  m_nType: number;              // UInt16
-  m_nAdId: number;              // UInt32
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nAdId: number; // UInt32
+  m_nTransID: number; // UInt32
 }
 
 export function readCGameAd(reader: BinaryReader): CGameAd {
@@ -159,8 +162,8 @@ export function readCGameAd(reader: BinaryReader): CGameAd {
 
 export interface CRespGameAd {
   m_stRetMsg: CCommonRespMsg;
-  m_nAdCount: number;           // UInt16
-  m_nDailyLimit: number;        // UInt16
+  m_nAdCount: number; // UInt16
+  m_nDailyLimit: number; // UInt16
 }
 
 export function writeCRespGameAd(writer: BinaryWriter, resp: CRespGameAd): void {
@@ -174,9 +177,9 @@ export function writeCRespGameAd(writer: BinaryWriter, resp: CRespGameAd): void 
 // =============================================================================
 
 export interface CReqGameGuide {
-  m_nType: number;              // UInt16
-  m_nGuideId: number;           // UInt32
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nGuideId: number; // UInt32
+  m_nTransID: number; // UInt32
 }
 
 export function readCReqGameGuide(reader: BinaryReader): CReqGameGuide {
@@ -189,7 +192,7 @@ export function readCReqGameGuide(reader: BinaryReader): CReqGameGuide {
 
 export interface CRespGameGuide {
   m_stRetMsg: CCommonRespMsg;
-  m_nGuideBits: bigint;         // UInt64
+  m_nGuideBits: bigint; // UInt64
 }
 
 export function writeCRespGameGuide(writer: BinaryWriter, resp: CRespGameGuide): void {
@@ -202,7 +205,7 @@ export function writeCRespGameGuide(writer: BinaryWriter, resp: CRespGameGuide):
 // =============================================================================
 
 export interface CReqGameClientData {
-  m_nType: number;              // UInt16
+  m_nType: number; // UInt16
   m_strClientData: string | null; // String
 }
 
@@ -215,7 +218,7 @@ export function readCReqGameClientData(reader: BinaryReader): CReqGameClientData
 
 export interface CRespGameClientData {
   m_stRetMsg: CCommonRespMsg;
-  m_strClientData: string;      // String
+  m_strClientData: string; // String
 }
 
 export function writeCRespGameClientData(writer: BinaryWriter, resp: CRespGameClientData): void {
@@ -228,9 +231,9 @@ export function writeCRespGameClientData(writer: BinaryWriter, resp: CRespGameCl
 // =============================================================================
 
 export interface CPveSeasonInfo {
-  m_nType: number;              // UInt16
-  m_nSeasonId: number;          // UInt32
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nSeasonId: number; // UInt32
+  m_nTransID: number; // UInt32
 }
 
 export function readCPveSeasonInfo(reader: BinaryReader): CPveSeasonInfo {
@@ -243,9 +246,9 @@ export function readCPveSeasonInfo(reader: BinaryReader): CPveSeasonInfo {
 
 export interface CRespPveSeasonInfo {
   m_stRetMsg: CCommonRespMsg;
-  m_nSeasonId: number;          // UInt32
-  m_nRank: number;              // UInt32
-  m_nScore: number;             // UInt32
+  m_nSeasonId: number; // UInt32
+  m_nRank: number; // UInt32
+  m_nScore: number; // UInt32
 }
 
 export function writeCRespPveSeasonInfo(writer: BinaryWriter, resp: CRespPveSeasonInfo): void {
@@ -260,8 +263,8 @@ export function writeCRespPveSeasonInfo(writer: BinaryWriter, resp: CRespPveSeas
 // =============================================================================
 
 export interface CReqGameFishing {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
 }
 
 export function readCReqGameFishing(reader: BinaryReader): CReqGameFishing {
@@ -272,9 +275,9 @@ export function readCReqGameFishing(reader: BinaryReader): CReqGameFishing {
 }
 
 export interface STGameFishingRank {
-  m_nRank: number;              // UInt32
-  m_nScore: number;             // UInt32
-  m_strName: string;            // String
+  m_nRank: number; // UInt32
+  m_nScore: number; // UInt32
+  m_strName: string; // String
 }
 
 export function writeSTGameFishingRank(writer: BinaryWriter, rank: STGameFishingRank): void {
@@ -285,7 +288,7 @@ export function writeSTGameFishingRank(writer: BinaryWriter, rank: STGameFishing
 
 export interface CRespGameFishing {
   m_stRetMsg: CCommonRespMsg;
-  m_nScore: number;             // UInt32
+  m_nScore: number; // UInt32
   m_vecRanks: STGameFishingRank[];
 }
 

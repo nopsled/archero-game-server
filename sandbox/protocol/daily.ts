@@ -2,12 +2,12 @@
  * Daily Tasks and Rewards Protocol Packets
  */
 
-import { BinaryReader, BinaryWriter } from "./binary";
-import { 
-  CCommonRespMsg, 
-  writeCCommonRespMsg, 
+import type { BinaryReader, BinaryWriter } from "./binary";
+import {
+  type CCommonRespMsg,
+  type CEquipmentItem,
   createSuccessResponse,
-  CEquipmentItem,
+  writeCCommonRespMsg,
   writeCEquipmentItem,
 } from "./common";
 
@@ -16,9 +16,9 @@ import {
 // =============================================================================
 
 export interface CRewardItem {
-  m_nType: number;              // UInt16
-  m_nId: number;                // UInt32
-  m_nCount: number;             // UInt32
+  m_nType: number; // UInt16
+  m_nId: number; // UInt32
+  m_nCount: number; // UInt32
 }
 
 export function writeCRewardItem(writer: BinaryWriter, item: CRewardItem): void {
@@ -32,9 +32,9 @@ export function writeCRewardItem(writer: BinaryWriter, item: CRewardItem): void 
 // =============================================================================
 
 export interface CDailyTaskInfo {
-  m_nType: number;              // UInt16
-  m_nId: number;                // UInt32
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nId: number; // UInt32
+  m_nTransID: number; // UInt32
 }
 
 export function readCDailyTaskInfo(reader: BinaryReader): CDailyTaskInfo {
@@ -46,9 +46,9 @@ export function readCDailyTaskInfo(reader: BinaryReader): CDailyTaskInfo {
 }
 
 export interface CWeeklyTaskInfo {
-  m_nType: number;              // UInt16
-  m_nId: number;                // UInt32
-  m_nTransID: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nId: number; // UInt32
+  m_nTransID: number; // UInt32
 }
 
 export function readCWeeklyTaskInfo(reader: BinaryReader): CWeeklyTaskInfo {
@@ -64,12 +64,15 @@ export function readCWeeklyTaskInfo(reader: BinaryReader): CWeeklyTaskInfo {
 // =============================================================================
 
 export interface STDailyTaskExtraRewardData {
-  m_nId: number;                // UInt32
-  m_nProgress: number;          // UInt32
-  m_bIsClaimed: boolean;        // Boolean
+  m_nId: number; // UInt32
+  m_nProgress: number; // UInt32
+  m_bIsClaimed: boolean; // Boolean
 }
 
-export function writeSTDailyTaskExtraRewardData(writer: BinaryWriter, data: STDailyTaskExtraRewardData): void {
+export function writeSTDailyTaskExtraRewardData(
+  writer: BinaryWriter,
+  data: STDailyTaskExtraRewardData,
+): void {
   writer.writeUInt32(data.m_nId);
   writer.writeUInt32(data.m_nProgress);
   writer.writeBool(data.m_bIsClaimed);
@@ -77,23 +80,23 @@ export function writeSTDailyTaskExtraRewardData(writer: BinaryWriter, data: STDa
 
 export interface CRespDailyTaskInfo {
   m_stRetMsg: CCommonRespMsg;
-  m_nEndTime: bigint;           // UInt64
-  m_nTaskPoint: number;         // UInt16
-  m_nTaskReward: bigint;        // UInt64
-  m_nTotalDiamonds: number;     // UInt32
-  m_nTotalCoins: number;        // UInt32
-  m_nLife: number;              // UInt16
+  m_nEndTime: bigint; // UInt64
+  m_nTaskPoint: number; // UInt16
+  m_nTaskReward: bigint; // UInt64
+  m_nTotalDiamonds: number; // UInt32
+  m_nTotalCoins: number; // UInt32
+  m_nLife: number; // UInt16
   m_nBattleRebornCount: number; // UInt16
   m_nNormalDiamondItem: number; // UInt16
-  m_nLargeDiamondItem: number;  // UInt16
-  m_nLevel: number;             // UInt16
-  m_nExperience: number;        // UInt32
+  m_nLargeDiamondItem: number; // UInt16
+  m_nLevel: number; // UInt16
+  m_nExperience: number; // UInt32
   m_arrEquipInfo: CEquipmentItem[] | null;
-  m_nTowerLife: number;         // UInt16
-  m_nMixBoxItem: number;        // UInt16
-  m_nDragonBoxItem: number;     // UInt16
-  m_nRelicsBoxItem: number;     // UInt16
-  m_nEquipSBoxItem: number;     // UInt16
+  m_nTowerLife: number; // UInt16
+  m_nMixBoxItem: number; // UInt16
+  m_nDragonBoxItem: number; // UInt16
+  m_nRelicsBoxItem: number; // UInt16
+  m_nEquipSBoxItem: number; // UInt16
   m_vecExtraRewardData: STDailyTaskExtraRewardData[];
 }
 
@@ -121,9 +124,9 @@ export function writeCRespDailyTaskInfo(writer: BinaryWriter, resp: CRespDailyTa
 
 export interface CRespWeeklyTaskInfo {
   m_stRetMsg: CCommonRespMsg;
-  m_nEndTime: bigint;           // UInt64
-  m_nTaskPoint: number;         // UInt16
-  m_nTaskReward: bigint;        // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_nTaskPoint: number; // UInt16
+  m_nTaskReward: bigint; // UInt64
 }
 
 export function writeCRespWeeklyTaskInfo(writer: BinaryWriter, resp: CRespWeeklyTaskInfo): void {
@@ -138,12 +141,12 @@ export function writeCRespWeeklyTaskInfo(writer: BinaryWriter, resp: CRespWeekly
 // =============================================================================
 
 export interface CDailyPlay {
-  m_nType: number;              // UInt16
-  m_nId: number;                // UInt32
-  m_nTransID: number;           // UInt32
-  m_nPartnerUserId: bigint;     // UInt64
-  m_nBattleTransID: number;     // UInt32
-  m_nDailyLevel: number;        // UInt32
+  m_nType: number; // UInt16
+  m_nId: number; // UInt32
+  m_nTransID: number; // UInt32
+  m_nPartnerUserId: bigint; // UInt64
+  m_nBattleTransID: number; // UInt32
+  m_nDailyLevel: number; // UInt32
 }
 
 export function readCDailyPlay(reader: BinaryReader): CDailyPlay {
@@ -159,8 +162,8 @@ export function readCDailyPlay(reader: BinaryReader): CDailyPlay {
 
 export interface CRespDailyPlayInfo {
   m_stRetMsg: CCommonRespMsg;
-  m_nDailyPlayCount: number;    // UInt16
-  m_nDailyPlayMax: number;      // UInt16
+  m_nDailyPlayCount: number; // UInt16
+  m_nDailyPlayMax: number; // UInt16
 }
 
 export function writeCRespDailyPlayInfo(writer: BinaryWriter, resp: CRespDailyPlayInfo): void {
@@ -174,9 +177,9 @@ export function writeCRespDailyPlayInfo(writer: BinaryWriter, resp: CRespDailyPl
 // =============================================================================
 
 export interface CReqDailyIapReward {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
-  m_strExtra: string | null;    // String
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
+  m_strExtra: string | null; // String
 }
 
 export function readCReqDailyIapReward(reader: BinaryReader): CReqDailyIapReward {
@@ -188,8 +191,8 @@ export function readCReqDailyIapReward(reader: BinaryReader): CReqDailyIapReward
 }
 
 export interface CReqWeekIapReward {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
 }
 
 export function readCReqWeekIapReward(reader: BinaryReader): CReqWeekIapReward {
@@ -200,8 +203,8 @@ export function readCReqWeekIapReward(reader: BinaryReader): CReqWeekIapReward {
 }
 
 export interface CReqMonthIapReward {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
 }
 
 export function readCReqMonthIapReward(reader: BinaryReader): CReqMonthIapReward {
@@ -213,8 +216,8 @@ export function readCReqMonthIapReward(reader: BinaryReader): CReqMonthIapReward
 
 export interface CRespDailyIapReward {
   m_stRetMsg: CCommonRespMsg;
-  m_nDays: number;              // UInt16
-  m_nRewardBits: bigint;        // UInt64
+  m_nDays: number; // UInt16
+  m_nRewardBits: bigint; // UInt64
 }
 
 export function writeCRespDailyIapReward(writer: BinaryWriter, resp: CRespDailyIapReward): void {
@@ -225,8 +228,8 @@ export function writeCRespDailyIapReward(writer: BinaryWriter, resp: CRespDailyI
 
 export interface CRespWeekIapReward {
   m_stRetMsg: CCommonRespMsg;
-  m_nWeeks: number;             // UInt16
-  m_nRewardBits: bigint;        // UInt64
+  m_nWeeks: number; // UInt16
+  m_nRewardBits: bigint; // UInt64
 }
 
 export function writeCRespWeekIapReward(writer: BinaryWriter, resp: CRespWeekIapReward): void {
@@ -237,8 +240,8 @@ export function writeCRespWeekIapReward(writer: BinaryWriter, resp: CRespWeekIap
 
 export interface CRespMonthIapReward {
   m_stRetMsg: CCommonRespMsg;
-  m_nMonths: number;            // UInt16
-  m_nRewardBits: bigint;        // UInt64
+  m_nMonths: number; // UInt16
+  m_nRewardBits: bigint; // UInt64
 }
 
 export function writeCRespMonthIapReward(writer: BinaryWriter, resp: CRespMonthIapReward): void {
@@ -254,7 +257,7 @@ export function writeCRespMonthIapReward(writer: BinaryWriter, resp: CRespMonthI
 export function createDefaultDailyTaskInfo(): CRespDailyTaskInfo {
   const now = BigInt(Math.floor(Date.now() / 1000));
   const todayEnd = now + BigInt(86400 - (Number(now) % 86400));
-  
+
   return {
     m_stRetMsg: createSuccessResponse(),
     m_nEndTime: todayEnd,

@@ -1,6 +1,6 @@
 /**
  * Binary Reader/Writer for GameProtocol
- * 
+ *
  * Matches the game's CustomBinaryReader/CustomBinaryWriter format:
  * - Little-endian encoding
  * - Length-prefixed strings (uint16 + utf8 bytes)
@@ -92,7 +92,7 @@ export class BinaryReader {
   readString(): string {
     const length = this.readUInt16();
     if (length === 0) return "";
-    
+
     const bytes = new Uint8Array(this.view.buffer, this.view.byteOffset + this.offset, length);
     this.offset += length;
     return new TextDecoder("utf-8").decode(bytes);
@@ -120,7 +120,6 @@ export class BinaryReader {
 // =============================================================================
 
 export class BinaryWriter {
-  private chunks: Uint8Array[] = [];
   private buffer: ArrayBuffer;
   private view: DataView;
   private offset: number = 0;

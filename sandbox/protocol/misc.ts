@@ -2,8 +2,8 @@
  * Shop, Guild, VIP, and Miscellaneous Protocol Packets
  */
 
-import { BinaryReader, BinaryWriter } from "./binary";
-import { CCommonRespMsg, writeCCommonRespMsg, createSuccessResponse } from "./common";
+import type { BinaryReader, BinaryWriter } from "./binary";
+import { type CCommonRespMsg, writeCCommonRespMsg } from "./common";
 
 // =============================================================================
 // SHOP
@@ -11,9 +11,9 @@ import { CCommonRespMsg, writeCCommonRespMsg, createSuccessResponse } from "./co
 
 export interface CRespShopBoxActivity {
   m_stRetMsg: CCommonRespMsg;
-  m_nActivityId: number;        // UInt32
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nActivityId: number; // UInt32
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
 }
 
 export function writeCRespShopBoxActivity(writer: BinaryWriter, resp: CRespShopBoxActivity): void {
@@ -28,9 +28,9 @@ export function writeCRespShopBoxActivity(writer: BinaryWriter, resp: CRespShopB
 // =============================================================================
 
 export interface CReqMonthCard {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nPlatformIndex: number;     // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nPlatformIndex: number; // UInt16
 }
 
 export function readCReqMonthCard(reader: BinaryReader): CReqMonthCard {
@@ -43,9 +43,9 @@ export function readCReqMonthCard(reader: BinaryReader): CReqMonthCard {
 
 export interface CRespMonthCard {
   m_stRetMsg: CCommonRespMsg;
-  m_nMonthCardEndTime: bigint;  // UInt64
+  m_nMonthCardEndTime: bigint; // UInt64
   m_nDoubleCardEndTime: bigint; // UInt64
-  m_nDailyRewardBits: bigint;   // UInt64
+  m_nDailyRewardBits: bigint; // UInt64
 }
 
 export function writeCRespMonthCard(writer: BinaryWriter, resp: CRespMonthCard): void {
@@ -56,8 +56,8 @@ export function writeCRespMonthCard(writer: BinaryWriter, resp: CRespMonthCard):
 }
 
 export interface CReqPrivilegeCard {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readCReqPrivilegeCard(reader: BinaryReader): CReqPrivilegeCard {
@@ -69,8 +69,8 @@ export function readCReqPrivilegeCard(reader: BinaryReader): CReqPrivilegeCard {
 
 export interface CRespPrivilegeCard {
   m_stRetMsg: CCommonRespMsg;
-  m_nEndTime: bigint;           // UInt64
-  m_nType: number;              // UInt16
+  m_nEndTime: bigint; // UInt64
+  m_nType: number; // UInt16
 }
 
 export function writeCRespPrivilegeCard(writer: BinaryWriter, resp: CRespPrivilegeCard): void {
@@ -84,8 +84,8 @@ export function writeCRespPrivilegeCard(writer: BinaryWriter, resp: CRespPrivile
 // =============================================================================
 
 export interface STReqVip {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqVip(reader: BinaryReader): STReqVip {
@@ -97,9 +97,9 @@ export function readSTReqVip(reader: BinaryReader): STReqVip {
 
 export interface STRespVip {
   m_stRetMsg: CCommonRespMsg;
-  m_nVipLevel: number;          // UInt16
-  m_nVipScore: number;          // UInt32
-  m_nRewardBits: bigint;        // UInt64
+  m_nVipLevel: number; // UInt16
+  m_nVipScore: number; // UInt32
+  m_nRewardBits: bigint; // UInt64
 }
 
 export function writeSTRespVip(writer: BinaryWriter, resp: STRespVip): void {
@@ -114,9 +114,9 @@ export function writeSTRespVip(writer: BinaryWriter, resp: STRespVip): void {
 // =============================================================================
 
 export interface CGuildTaskInfo {
-  m_nTaskId: number;            // UInt32
-  m_nProgress: number;          // UInt32
-  m_bIsClaimed: boolean;        // Boolean
+  m_nTaskId: number; // UInt32
+  m_nProgress: number; // UInt32
+  m_bIsClaimed: boolean; // Boolean
 }
 
 export function writeCGuildTaskInfo(writer: BinaryWriter, info: CGuildTaskInfo): void {
@@ -136,9 +136,9 @@ export function writeCRespGuildTaskInfo(writer: BinaryWriter, resp: CRespGuildTa
 }
 
 export interface CGuildAchInfo {
-  m_nAchId: number;             // UInt32
-  m_nProgress: number;          // UInt32
-  m_nLevel: number;             // UInt16
+  m_nAchId: number; // UInt32
+  m_nProgress: number; // UInt32
+  m_nLevel: number; // UInt16
 }
 
 export function writeCGuildAchInfo(writer: BinaryWriter, info: CGuildAchInfo): void {
@@ -149,9 +149,9 @@ export function writeCGuildAchInfo(writer: BinaryWriter, info: CGuildAchInfo): v
 
 export interface CRespGuildUserLogin {
   m_stRetMsg: CCommonRespMsg;
-  m_nGuildId: bigint;           // UInt64
-  m_strGuildName: string;       // String
-  m_nGuildLevel: number;        // UInt16
+  m_nGuildId: bigint; // UInt64
+  m_strGuildName: string; // String
+  m_nGuildLevel: number; // UInt16
 }
 
 export function writeCRespGuildUserLogin(writer: BinaryWriter, resp: CRespGuildUserLogin): void {
@@ -163,10 +163,13 @@ export function writeCRespGuildUserLogin(writer: BinaryWriter, resp: CRespGuildU
 
 export interface CRespQueryGuildRedpacket {
   m_stRetMsg: CCommonRespMsg;
-  m_nRedpacketCount: number;    // UInt16
+  m_nRedpacketCount: number; // UInt16
 }
 
-export function writeCRespQueryGuildRedpacket(writer: BinaryWriter, resp: CRespQueryGuildRedpacket): void {
+export function writeCRespQueryGuildRedpacket(
+  writer: BinaryWriter,
+  resp: CRespQueryGuildRedpacket,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt16(resp.m_nRedpacketCount);
 }
@@ -176,11 +179,11 @@ export function writeCRespQueryGuildRedpacket(writer: BinaryWriter, resp: CRespQ
 // =============================================================================
 
 export interface CReqUserBack {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nRewardType: number;        // UInt16
-  m_nRewardIndex: number;       // UInt16
-  m_strExtra: string | null;    // String
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nRewardType: number; // UInt16
+  m_nRewardIndex: number; // UInt16
+  m_strExtra: string | null; // String
 }
 
 export function readCReqUserBack(reader: BinaryReader): CReqUserBack {
@@ -195,8 +198,8 @@ export function readCReqUserBack(reader: BinaryReader): CReqUserBack {
 
 export interface CRespUserBack {
   m_stRetMsg: CCommonRespMsg;
-  m_nDays: number;              // UInt16
-  m_nRewardBits: bigint;        // UInt64
+  m_nDays: number; // UInt16
+  m_nRewardBits: bigint; // UInt64
 }
 
 export function writeCRespUserBack(writer: BinaryWriter, resp: CRespUserBack): void {
@@ -206,9 +209,9 @@ export function writeCRespUserBack(writer: BinaryWriter, resp: CRespUserBack): v
 }
 
 export interface CReqLoginGift {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nRewardIndex: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nRewardIndex: number; // UInt16
 }
 
 export function readCReqLoginGift(reader: BinaryReader): CReqLoginGift {
@@ -221,8 +224,8 @@ export function readCReqLoginGift(reader: BinaryReader): CReqLoginGift {
 
 export interface CRespLoginGift {
   m_stRetMsg: CCommonRespMsg;
-  m_nDays: number;              // UInt16
-  m_nRewardBits: bigint;        // UInt64
+  m_nDays: number; // UInt16
+  m_nRewardBits: bigint; // UInt64
 }
 
 export function writeCRespLoginGift(writer: BinaryWriter, resp: CRespLoginGift): void {
@@ -232,8 +235,8 @@ export function writeCRespLoginGift(writer: BinaryWriter, resp: CRespLoginGift):
 }
 
 export interface CReqWeeklyGift {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readCReqWeeklyGift(reader: BinaryReader): CReqWeeklyGift {
@@ -245,8 +248,8 @@ export function readCReqWeeklyGift(reader: BinaryReader): CReqWeeklyGift {
 
 export interface CRespWeeklyGift {
   m_stRetMsg: CCommonRespMsg;
-  m_nWeeks: number;             // UInt16
-  m_nRewardBits: bigint;        // UInt64
+  m_nWeeks: number; // UInt16
+  m_nRewardBits: bigint; // UInt64
 }
 
 export function writeCRespWeeklyGift(writer: BinaryWriter, resp: CRespWeeklyGift): void {
@@ -260,8 +263,8 @@ export function writeCRespWeeklyGift(writer: BinaryWriter, resp: CRespWeeklyGift
 // =============================================================================
 
 export interface CReqFirstCharge {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readCReqFirstCharge(reader: BinaryReader): CReqFirstCharge {
@@ -273,8 +276,8 @@ export function readCReqFirstCharge(reader: BinaryReader): CReqFirstCharge {
 
 export interface CRespFirstCharge {
   m_stRetMsg: CCommonRespMsg;
-  m_nStatus: number;            // UInt16
-  m_nRewardBits: bigint;        // UInt64
+  m_nStatus: number; // UInt16
+  m_nRewardBits: bigint; // UInt64
 }
 
 export function writeCRespFirstCharge(writer: BinaryWriter, resp: CRespFirstCharge): void {
@@ -288,8 +291,8 @@ export function writeCRespFirstCharge(writer: BinaryWriter, resp: CRespFirstChar
 // =============================================================================
 
 export interface CQueryFirstIAPInfo {
-  m_nType: number;              // UInt16
-  m_nTransId: number;           // UInt32
+  m_nType: number; // UInt16
+  m_nTransId: number; // UInt32
 }
 
 export function readCQueryFirstIAPInfo(reader: BinaryReader): CQueryFirstIAPInfo {
@@ -304,10 +307,10 @@ export function readCQueryFirstIAPInfo(reader: BinaryReader): CQueryFirstIAPInfo
 // =============================================================================
 
 export interface STReqBindingHabbyID {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
   m_strAuthCode: string | null; // String
-  m_strLanguage: string;        // String
+  m_strLanguage: string; // String
 }
 
 export function readSTReqBindingHabbyID(reader: BinaryReader): STReqBindingHabbyID {
@@ -321,8 +324,8 @@ export function readSTReqBindingHabbyID(reader: BinaryReader): STReqBindingHabby
 
 export interface STRespBindingHabbyID {
   m_stRetMsg: CCommonRespMsg;
-  m_strHabbyID: string;         // String
-  m_nStatus: number;            // UInt16
+  m_strHabbyID: string; // String
+  m_nStatus: number; // UInt16
 }
 
 export function writeSTRespBindingHabbyID(writer: BinaryWriter, resp: STRespBindingHabbyID): void {
@@ -336,9 +339,9 @@ export function writeSTRespBindingHabbyID(writer: BinaryWriter, resp: STRespBind
 // =============================================================================
 
 export interface CReqFarm {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
-  m_nSlotId: number;            // UInt16
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
+  m_nSlotId: number; // UInt16
 }
 
 export function readCReqFarm(reader: BinaryReader): CReqFarm {
@@ -350,10 +353,10 @@ export function readCReqFarm(reader: BinaryReader): CReqFarm {
 }
 
 export interface CFarmSlot {
-  m_nSlotId: number;            // UInt16
-  m_nPlantId: number;           // UInt32
-  m_nPlantTime: bigint;         // UInt64
-  m_nStatus: number;            // UInt16
+  m_nSlotId: number; // UInt16
+  m_nPlantId: number; // UInt32
+  m_nPlantTime: bigint; // UInt64
+  m_nStatus: number; // UInt16
 }
 
 export function writeCFarmSlot(writer: BinaryWriter, slot: CFarmSlot): void {
@@ -378,9 +381,9 @@ export function writeCRespFarm(writer: BinaryWriter, resp: CRespFarm): void {
 // =============================================================================
 
 export interface CMonsterEgg {
-  m_nEggId: number;             // UInt32
-  m_nSlotId: number;            // UInt16
-  m_nStartTime: bigint;         // UInt64
+  m_nEggId: number; // UInt32
+  m_nSlotId: number; // UInt16
+  m_nStartTime: bigint; // UInt64
 }
 
 export function writeCMonsterEgg(writer: BinaryWriter, egg: CMonsterEgg): void {
@@ -390,9 +393,9 @@ export function writeCMonsterEgg(writer: BinaryWriter, egg: CMonsterEgg): void {
 }
 
 export interface CMonsterHatch {
-  m_nMonsterId: number;         // UInt32
-  m_nLevel: number;             // UInt16
-  m_nStar: number;              // UInt16
+  m_nMonsterId: number; // UInt32
+  m_nLevel: number; // UInt16
+  m_nStar: number; // UInt16
 }
 
 export function writeCMonsterHatch(writer: BinaryWriter, hatch: CMonsterHatch): void {
@@ -416,11 +419,13 @@ export function writeCRespMonsterHatch(writer: BinaryWriter, resp: CRespMonsterH
 // =============================================================================
 
 export interface STReqShipBattleSeasonGhostShip {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
 }
 
-export function readSTReqShipBattleSeasonGhostShip(reader: BinaryReader): STReqShipBattleSeasonGhostShip {
+export function readSTReqShipBattleSeasonGhostShip(
+  reader: BinaryReader,
+): STReqShipBattleSeasonGhostShip {
   return {
     m_nTransID: reader.readUInt32(),
     m_nType: reader.readUInt16(),
@@ -428,9 +433,9 @@ export function readSTReqShipBattleSeasonGhostShip(reader: BinaryReader): STReqS
 }
 
 export interface CShipBattleBaseRank {
-  m_nRank: number;              // UInt32
-  m_nScore: number;             // UInt32
-  m_strName: string;            // String
+  m_nRank: number; // UInt32
+  m_nScore: number; // UInt32
+  m_strName: string; // String
 }
 
 export function writeCShipBattleBaseRank(writer: BinaryWriter, rank: CShipBattleBaseRank): void {
@@ -441,11 +446,14 @@ export function writeCShipBattleBaseRank(writer: BinaryWriter, rank: CShipBattle
 
 export interface STShipBattleSeasonIsLandRankInfo {
   m_vecRank: CShipBattleBaseRank[];
-  m_nRankValue: bigint;         // UInt64
-  m_nRank: number;              // UInt32
+  m_nRankValue: bigint; // UInt64
+  m_nRank: number; // UInt32
 }
 
-export function writeSTShipBattleSeasonIsLandRankInfo(writer: BinaryWriter, info: STShipBattleSeasonIsLandRankInfo): void {
+export function writeSTShipBattleSeasonIsLandRankInfo(
+  writer: BinaryWriter,
+  info: STShipBattleSeasonIsLandRankInfo,
+): void {
   writer.writeArray(info.m_vecRank, (r) => writeCShipBattleBaseRank(writer, r));
   writer.writeUInt64(info.m_nRankValue);
   writer.writeUInt32(info.m_nRank);
@@ -454,16 +462,19 @@ export function writeSTShipBattleSeasonIsLandRankInfo(writer: BinaryWriter, info
 export interface STRespShipBattleSeasonGhostShip {
   m_stRetMsg: CCommonRespMsg;
   m_nRemainFreeChallenges: number; // UInt32
-  m_nPayChallengeCount: number;    // UInt32
-  m_nDailyChallengeCount: number;  // UInt32
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
-  m_nRankEndTime: bigint;       // UInt64
+  m_nPayChallengeCount: number; // UInt32
+  m_nDailyChallengeCount: number; // UInt32
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_nRankEndTime: bigint; // UInt64
   mstRankInfo: STShipBattleSeasonIsLandRankInfo;
-  m_nChallengeLimit: number;    // UInt32
+  m_nChallengeLimit: number; // UInt32
 }
 
-export function writeSTRespShipBattleSeasonGhostShip(writer: BinaryWriter, resp: STRespShipBattleSeasonGhostShip): void {
+export function writeSTRespShipBattleSeasonGhostShip(
+  writer: BinaryWriter,
+  resp: STRespShipBattleSeasonGhostShip,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt32(resp.m_nRemainFreeChallenges);
   writer.writeUInt32(resp.m_nPayChallengeCount);
@@ -481,8 +492,8 @@ export function writeSTRespShipBattleSeasonGhostShip(writer: BinaryWriter, resp:
 // =============================================================================
 
 export interface CDailyGiftGemData {
-  m_nGemId: number;             // UInt32
-  m_nCount: number;             // UInt16
+  m_nGemId: number; // UInt32
+  m_nCount: number; // UInt16
 }
 
 export function writeCDailyGiftGemData(writer: BinaryWriter, data: CDailyGiftGemData): void {
@@ -491,8 +502,8 @@ export function writeCDailyGiftGemData(writer: BinaryWriter, data: CDailyGiftGem
 }
 
 export interface CDailyGiftHeroData {
-  m_nHeroId: number;            // UInt32
-  m_nFragments: number;         // UInt16
+  m_nHeroId: number; // UInt32
+  m_nFragments: number; // UInt16
 }
 
 export function writeCDailyGiftHeroData(writer: BinaryWriter, data: CDailyGiftHeroData): void {
@@ -501,9 +512,9 @@ export function writeCDailyGiftHeroData(writer: BinaryWriter, data: CDailyGiftHe
 }
 
 export interface CReqDailyIapGift {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nSelectHeroIndex: number;   // UInt32
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nSelectHeroIndex: number; // UInt32
 }
 
 export function readCReqDailyIapGift(reader: BinaryReader): CReqDailyIapGift {
@@ -516,7 +527,7 @@ export function readCReqDailyIapGift(reader: BinaryReader): CReqDailyIapGift {
 
 export interface CRespDailyIapGift {
   m_stRetMsg: CCommonRespMsg;
-  m_nDays: number;              // UInt16
+  m_nDays: number; // UInt16
   m_vecGems: CDailyGiftGemData[];
   m_vecHeroes: CDailyGiftHeroData[];
 }

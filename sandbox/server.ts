@@ -8,17 +8,17 @@
  * Run: bun run dev
  */
 
+import * as crypto from "node:crypto";
+import * as net from "node:net";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
-import * as crypto from "crypto";
-import * as net from "net";
 
 import {
   BinaryReader,
   BinaryWriter,
+  createDefaultLoginResponse,
   readCUserLoginPacket,
   writeCRespUserLoginPacket,
-  createDefaultLoginResponse,
 } from "./protocol";
 
 const app = new Hono();
@@ -48,7 +48,8 @@ function desEncrypt(plaintext: string): string {
   return encrypted;
 }
 
-function desDecrypt(ciphertext: string): string {
+// Unused but kept for reference
+function _desDecrypt(ciphertext: string): string {
   const keyBuffer = Buffer.from(ENCRYPTION_KEY.slice(0, 8));
   const iv = Buffer.alloc(8, 0);
   const decipher = crypto.createDecipheriv("des-cbc", keyBuffer, iv);
@@ -71,24 +72,16 @@ function encryptResponse(data: object): string {
 function verifyRequest(
   habbyTime: string | undefined,
   habbyCheck: string | undefined,
-  body: Buffer
+  body: Buffer,
 ): boolean {
   if (!habbyTime || !habbyCheck) {
     console.log("[Sandbox] Missing HabbyTime or HabbyCheck headers");
     return false;
   }
 
-  const input = Buffer.concat([
-    Buffer.from(API_KEY),
-    Buffer.from(habbyTime),
-    body,
-  ]);
+  const input = Buffer.concat([Buffer.from(API_KEY), Buffer.from(habbyTime), body]);
 
-  const expected = crypto
-    .createHash("sha256")
-    .update(input)
-    .digest("hex")
-    .toUpperCase();
+  const expected = crypto.createHash("sha256").update(input).digest("hex").toUpperCase();
 
   const valid = habbyCheck === expected;
   if (!valid) {
@@ -130,14 +123,18 @@ function createPacket(msgType: number, payload: Buffer): Buffer {
 }
 
 function handlePacket(packet: Packet): Buffer | null {
-  console.log(`[TCP] Received message type 0x${packet.msgType.toString(16).padStart(4, '0')} (${packet.payload.length} bytes)`);
+  console.log(
+    `[TCP] Received message type 0x${packet.msgType.toString(16).padStart(4, "0")} (${packet.payload.length} bytes)`,
+  );
 
   switch (packet.msgType) {
     case MSG_TYPE_USER_LOGIN: {
       try {
         const reader = new BinaryReader(packet.payload);
         const loginReq = readCUserLoginPacket(reader);
-        console.log(`[TCP] Login request: transId=${loginReq.m_nTransID}, platform="${loginReq.m_strPlatform}"`);
+        console.log(
+          `[TCP] Login request: transId=${loginReq.m_nTransID}, platform="${loginReq.m_strPlatform}"`,
+        );
 
         // Create login response
         const loginResp = createDefaultLoginResponse(loginReq.m_nTransID);
@@ -164,27 +161,27 @@ function handlePacket(packet: Packet): Buffer | null {
 function logUnknownPacket(packet: Packet): void {
   const { msgType, payload } = packet;
 
-  console.log(`\n${'='.repeat(80)}`);
-  console.log(`[UNKNOWN PACKET] Message Type: 0x${msgType.toString(16).padStart(4, '0')} (${msgType})`);
-  console.log(`${'='.repeat(80)}`);
+  console.log(`\n${"=".repeat(80)}`);
+  console.log(
+    `[UNKNOWN PACKET] Message Type: 0x${msgType.toString(16).padStart(4, "0")} (${msgType})`,
+  );
+  console.log(`${"=".repeat(80)}`);
   console.log(`Payload Size: ${payload.length} bytes`);
   console.log(`Timestamp: ${new Date().toISOString()}`);
   console.log();
 
   // Full hex dump with ASCII
   console.log(`[HEX DUMP]`);
-  console.log(`${'─'.repeat(80)}`);
+  console.log(`${"─".repeat(80)}`);
   printHexDump(payload);
   console.log();
 
   // Try to parse common fields
   console.log(`[FIELD ANALYSIS]`);
-  console.log(`${'─'.repeat(80)}`);
+  console.log(`${"─".repeat(80)}`);
 
   if (payload.length >= 4) {
     try {
-      const reader = new BinaryReader(payload);
-
       // Common packet patterns: transId first
       const u32_0 = payload.readUInt32LE(0);
       console.log(`  offset 0: UInt32 = ${u32_0} (possibly m_nTransID)`);
@@ -207,16 +204,15 @@ function logUnknownPacket(packet: Packet): void {
       // Try to find strings (length-prefixed)
       console.log();
       console.log(`[STRING SEARCH]`);
-      console.log(`${'─'.repeat(80)}`);
+      console.log(`${"─".repeat(80)}`);
       findStrings(payload);
-
     } catch (e) {
       console.log(`  (failed to parse fields: ${e})`);
     }
   }
 
   console.log();
-  console.log(`${'='.repeat(80)}\n`);
+  console.log(`${"=".repeat(80)}\n`);
 }
 
 function printHexDump(buffer: Buffer): void {
@@ -225,27 +221,27 @@ function printHexDump(buffer: Buffer): void {
     const line = buffer.subarray(i, Math.min(i + bytesPerLine, buffer.length));
 
     // Offset
-    const offset = i.toString(16).padStart(8, '0');
+    const offset = i.toString(16).padStart(8, "0");
 
     // Hex bytes
     const hexParts: string[] = [];
     for (let j = 0; j < bytesPerLine; j++) {
       if (j < line.length) {
-        hexParts.push(line[j].toString(16).padStart(2, '0'));
+        hexParts.push(line[j].toString(16).padStart(2, "0"));
       } else {
-        hexParts.push('  ');
+        hexParts.push("  ");
       }
     }
-    const hex = hexParts.join(' ');
+    const hex = hexParts.join(" ");
 
     // ASCII representation
-    let ascii = '';
+    let ascii = "";
     for (let j = 0; j < line.length; j++) {
       const byte = line[j];
       if (byte >= 32 && byte <= 126) {
         ascii += String.fromCharCode(byte);
       } else {
-        ascii += '.';
+        ascii += ".";
       }
     }
 
@@ -268,8 +264,10 @@ function findStrings(buffer: Buffer): void {
         }
       }
       if (printable && str.length > 2) {
-        const text = str.toString('utf8');
-        console.log(`  offset ${i}: String[${length}] = "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"`);
+        const text = str.toString("utf8");
+        console.log(
+          `  offset ${i}: String[${length}] = "${text.substring(0, 100)}${text.length > 100 ? "..." : ""}"`,
+        );
       }
     }
   }
@@ -291,8 +289,8 @@ const tcpServer = net.createServer((socket) => {
     console.log(`[TCP] Received ${data.length} bytes (buffer: ${buffer.length} bytes)`);
 
     // Try to parse complete packets
-    let result;
-    while ((result = parsePacket(buffer)) !== null) {
+    let result: { packet: Packet; remaining: Buffer } | null = parsePacket(buffer);
+    while (result !== null) {
       const { packet, remaining } = result;
       buffer = remaining;
 
@@ -301,6 +299,8 @@ const tcpServer = net.createServer((socket) => {
         socket.write(response);
         console.log(`[TCP] Sent response: ${response.length} bytes`);
       }
+
+      result = parsePacket(buffer);
     }
   });
 
@@ -345,7 +345,7 @@ app.put("/", async (c) => {
   const habbyTime = c.req.header("HabbyTime");
   const habbyCheck = c.req.header("HabbyCheck");
   const habbyType = c.req.header("HabbyType");
-  const habbyVersion = c.req.header("HabbyVersion");
+  const _habbyVersion = c.req.header("HabbyVersion");
 
   // Get raw body
   const body = Buffer.from(await c.req.arrayBuffer());

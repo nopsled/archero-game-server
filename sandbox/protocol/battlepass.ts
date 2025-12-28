@@ -1,24 +1,27 @@
 /**
  * Battlepass Protocol Packets
- * 
+ *
  * Battle pass related request and response packets.
  */
 
-import { BinaryReader, BinaryWriter } from "./binary";
-import { CCommonRespMsg, writeCCommonRespMsg, createSuccessResponse } from "./common";
+import type { BinaryReader, BinaryWriter } from "./binary";
+import { type CCommonRespMsg, createSuccessResponse, writeCCommonRespMsg } from "./common";
 
 // =============================================================================
 // BATTLEPASS REWARD CONFIG
 // =============================================================================
 
 export interface CBattlePassExtraRewardConf {
-  nExtraCnt: number;            // UInt16
-  nExtraCondParam: number;      // UInt16
-  strReward: string;            // String (e.g., "4,2203,1")
-  strBigReward: string;         // String
+  nExtraCnt: number; // UInt16
+  nExtraCondParam: number; // UInt16
+  strReward: string; // String (e.g., "4,2203,1")
+  strBigReward: string; // String
 }
 
-export function writeCBattlePassExtraRewardConf(writer: BinaryWriter, conf: CBattlePassExtraRewardConf): void {
+export function writeCBattlePassExtraRewardConf(
+  writer: BinaryWriter,
+  conf: CBattlePassExtraRewardConf,
+): void {
   writer.writeUInt16(conf.nExtraCnt);
   writer.writeUInt16(conf.nExtraCondParam);
   writer.writeString(conf.strReward);
@@ -26,13 +29,16 @@ export function writeCBattlePassExtraRewardConf(writer: BinaryWriter, conf: CBat
 }
 
 export interface CBattlePassRewardConf {
-  nId: number;                  // UInt32
-  nCondType: number;            // UInt16
-  nParam: number;               // UInt16
-  m_arrRewardInfo: string[];    // String[]
+  nId: number; // UInt32
+  nCondType: number; // UInt16
+  nParam: number; // UInt16
+  m_arrRewardInfo: string[]; // String[]
 }
 
-export function writeCBattlePassRewardConf(writer: BinaryWriter, conf: CBattlePassRewardConf): void {
+export function writeCBattlePassRewardConf(
+  writer: BinaryWriter,
+  conf: CBattlePassRewardConf,
+): void {
   writer.writeUInt32(conf.nId);
   writer.writeUInt16(conf.nCondType);
   writer.writeUInt16(conf.nParam);
@@ -44,16 +50,16 @@ export function writeCBattlePassRewardConf(writer: BinaryWriter, conf: CBattlePa
 // =============================================================================
 
 export interface CReqBattlepassReward {
-  m_nTransID: number;           // UInt32
-  m_nBattleTag: number;         // UInt32
-  m_nType: number;              // UInt16
-  m_nKillsOrRewardId: number;   // UInt32
-  m_nRewardIndex: number;       // UInt32
-  m_strExtra: string | null;    // String
-  m_strExtend: string | null;   // String
-  m_nBattlePassType: number;    // UInt16
-  m_nBattlePassId: number;      // UInt16
-  m_nBattlePassIndex: number;   // UInt16
+  m_nTransID: number; // UInt32
+  m_nBattleTag: number; // UInt32
+  m_nType: number; // UInt16
+  m_nKillsOrRewardId: number; // UInt32
+  m_nRewardIndex: number; // UInt32
+  m_strExtra: string | null; // String
+  m_strExtend: string | null; // String
+  m_nBattlePassType: number; // UInt16
+  m_nBattlePassId: number; // UInt16
+  m_nBattlePassIndex: number; // UInt16
 }
 
 export function readCReqBattlepassReward(reader: BinaryReader): CReqBattlepassReward {
@@ -77,23 +83,23 @@ export function readCReqBattlepassReward(reader: BinaryReader): CReqBattlepassRe
 
 export interface CRespBattlepassConf {
   m_stRetMsg: CCommonRespMsg;
-  nStartTimestamp: bigint;      // UInt64
-  nEndTimestamp: bigint;        // UInt64
-  m_nBattlepassTag: number;     // UInt32
-  bIsGin: boolean;              // Boolean
-  nType: number;                // UInt16
-  nEventId: number;             // UInt16
+  nStartTimestamp: bigint; // UInt64
+  nEndTimestamp: bigint; // UInt64
+  m_nBattlepassTag: number; // UInt32
+  bIsGin: boolean; // Boolean
+  nType: number; // UInt16
+  nEventId: number; // UInt16
   stExtraReward: CBattlePassExtraRewardConf;
   m_arrTagInfo: CBattlePassRewardConf[];
-  nMinVersion: number;          // UInt16
-  nMaxVersion: number;          // UInt16
-  nSweepAddCnt: number;         // UInt16
-  nSweepCoinAdd: number;        // UInt16
-  bIsNew: boolean;              // Boolean
-  nDropRelicsAdd: number;       // UInt16
-  nHarvestQuickAdd: number;     // UInt16
-  nDropBossEggAdd: number;      // UInt16
-  nRate: number;                // UInt16
+  nMinVersion: number; // UInt16
+  nMaxVersion: number; // UInt16
+  nSweepAddCnt: number; // UInt16
+  nSweepCoinAdd: number; // UInt16
+  bIsNew: boolean; // Boolean
+  nDropRelicsAdd: number; // UInt16
+  nHarvestQuickAdd: number; // UInt16
+  nDropBossEggAdd: number; // UInt16
+  nRate: number; // UInt16
 }
 
 export function writeCRespBattlepassConf(writer: BinaryWriter, resp: CRespBattlepassConf): void {
@@ -121,11 +127,14 @@ export function writeCRespBattlepassConf(writer: BinaryWriter, resp: CRespBattle
 
 export interface CRespBattlepassReward {
   m_stRetMsg: CCommonRespMsg;
-  m_nKills: number;             // UInt32
-  m_nRewardBits: bigint;        // UInt64
+  m_nKills: number; // UInt32
+  m_nRewardBits: bigint; // UInt64
 }
 
-export function writeCRespBattlepassReward(writer: BinaryWriter, resp: CRespBattlepassReward): void {
+export function writeCRespBattlepassReward(
+  writer: BinaryWriter,
+  resp: CRespBattlepassReward,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt32(resp.m_nKills);
   writer.writeUInt64(resp.m_nRewardBits);
@@ -136,21 +145,24 @@ export function writeCRespBattlepassReward(writer: BinaryWriter, resp: CRespBatt
 // =============================================================================
 
 export interface STActivityBattlePassItem {
-  m_nId: number;                // UInt32
-  m_nProgress: number;          // UInt32
-  m_nRewardBits: bigint;        // UInt64
+  m_nId: number; // UInt32
+  m_nProgress: number; // UInt32
+  m_nRewardBits: bigint; // UInt64
 }
 
-export function writeSTActivityBattlePassItem(writer: BinaryWriter, item: STActivityBattlePassItem): void {
+export function writeSTActivityBattlePassItem(
+  writer: BinaryWriter,
+  item: STActivityBattlePassItem,
+): void {
   writer.writeUInt32(item.m_nId);
   writer.writeUInt32(item.m_nProgress);
   writer.writeUInt64(item.m_nRewardBits);
 }
 
 export interface STActivityBattlePass {
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
-  m_nTag: number;               // UInt32
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_nTag: number; // UInt32
   m_vecItems: STActivityBattlePassItem[];
 }
 

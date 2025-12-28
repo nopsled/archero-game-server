@@ -1,23 +1,23 @@
 /**
  * Activity Protocol Packets
- * 
+ *
  * Request and response packets for various game activities.
  * Based on captured field data from protocol discovery.
  */
 
-import { BinaryReader, BinaryWriter } from "./binary";
-import { CCommonRespMsg, writeCCommonRespMsg, createSuccessResponse } from "./common";
+import type { BinaryReader, BinaryWriter } from "./binary";
+import { type CCommonRespMsg, createSuccessResponse, writeCCommonRespMsg } from "./common";
 
 // =============================================================================
 // ACTIVITY COMMON DATA
 // =============================================================================
 
 export interface CActivityCommonData {
-  m_nActivityId: number;        // UInt32
-  m_nActivityType: number;      // UInt16
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
-  m_nStatus: number;            // UInt16
+  m_nActivityId: number; // UInt32
+  m_nActivityType: number; // UInt16
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_nStatus: number; // UInt16
 }
 
 export function writeCActivityCommonData(writer: BinaryWriter, data: CActivityCommonData): void {
@@ -33,14 +33,17 @@ export function writeCActivityCommonData(writer: BinaryWriter, data: CActivityCo
 // =============================================================================
 
 export interface CActivityInvestCondition {
-  m_nConditionId: number;       // UInt32
-  m_nConditionType: number;     // UInt16
-  m_nCurrentValue: number;      // UInt32
-  m_nTargetValue: number;       // UInt32
-  m_bIsComplete: boolean;       // Boolean
+  m_nConditionId: number; // UInt32
+  m_nConditionType: number; // UInt16
+  m_nCurrentValue: number; // UInt32
+  m_nTargetValue: number; // UInt32
+  m_bIsComplete: boolean; // Boolean
 }
 
-export function writeCActivityInvestCondition(writer: BinaryWriter, cond: CActivityInvestCondition): void {
+export function writeCActivityInvestCondition(
+  writer: BinaryWriter,
+  cond: CActivityInvestCondition,
+): void {
   writer.writeUInt32(cond.m_nConditionId);
   writer.writeUInt16(cond.m_nConditionType);
   writer.writeUInt32(cond.m_nCurrentValue);
@@ -49,9 +52,9 @@ export function writeCActivityInvestCondition(writer: BinaryWriter, cond: CActiv
 }
 
 export interface CActivityInvestData {
-  m_nInvestId: number;          // UInt32
-  m_nLevel: number;             // UInt16
-  m_bIsBought: boolean;         // Boolean
+  m_nInvestId: number; // UInt32
+  m_nLevel: number; // UInt16
+  m_bIsBought: boolean; // Boolean
   m_vecConditions: CActivityInvestCondition[];
 }
 
@@ -67,12 +70,12 @@ export function writeCActivityInvestData(writer: BinaryWriter, data: CActivityIn
 // =============================================================================
 
 export interface CReqActivityCommon {
-  m_nRequestType: number;       // UInt16
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nRewardId: number;          // UInt16
-  m_nRewardType: number;        // UInt16
-  m_strExtra: string | null;    // String
+  m_nRequestType: number; // UInt16
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nRewardId: number; // UInt16
+  m_nRewardType: number; // UInt16
+  m_strExtra: string | null; // String
 }
 
 export function readCReqActivityCommon(reader: BinaryReader): CReqActivityCommon {
@@ -87,10 +90,10 @@ export function readCReqActivityCommon(reader: BinaryReader): CReqActivityCommon
 }
 
 export interface CReqActivityShip {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nId: number;                // UInt32
-  m_strExtra: string | null;    // String
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nId: number; // UInt32
+  m_strExtra: string | null; // String
 }
 
 export function readCReqActivityShip(reader: BinaryReader): CReqActivityShip {
@@ -103,10 +106,10 @@ export function readCReqActivityShip(reader: BinaryReader): CReqActivityShip {
 }
 
 export interface CReqActivitySuperRoulette {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nTaskIndex: number;         // UInt16
-  m_nCountRewardIndex: number;  // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nTaskIndex: number; // UInt16
+  m_nCountRewardIndex: number; // UInt16
 }
 
 export function readCReqActivitySuperRoulette(reader: BinaryReader): CReqActivitySuperRoulette {
@@ -119,9 +122,9 @@ export function readCReqActivitySuperRoulette(reader: BinaryReader): CReqActivit
 }
 
 export interface CReqActivityContinueGift {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nRewardIndex: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nRewardIndex: number; // UInt16
 }
 
 export function readCReqActivityContinueGift(reader: BinaryReader): CReqActivityContinueGift {
@@ -133,10 +136,10 @@ export function readCReqActivityContinueGift(reader: BinaryReader): CReqActivity
 }
 
 export interface CReqActivityDiamondChoice {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nId: number;                // UInt16
-  m_vecChoiceIndex: number[];   // UInt16[]
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nId: number; // UInt16
+  m_vecChoiceIndex: number[]; // UInt16[]
 }
 
 export function readCReqActivityDiamondChoice(reader: BinaryReader): CReqActivityDiamondChoice {
@@ -149,10 +152,10 @@ export function readCReqActivityDiamondChoice(reader: BinaryReader): CReqActivit
 }
 
 export interface CReqActivityExchange {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nIndex: number;             // UInt16
-  m_strExtra: string | null;    // String
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nIndex: number; // UInt16
+  m_strExtra: string | null; // String
 }
 
 export function readCReqActivityExchange(reader: BinaryReader): CReqActivityExchange {
@@ -165,9 +168,9 @@ export function readCReqActivityExchange(reader: BinaryReader): CReqActivityExch
 }
 
 export interface CReqActivityInvest {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nInvestId: number;          // UInt32
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nInvestId: number; // UInt32
 }
 
 export function readCReqActivityInvest(reader: BinaryReader): CReqActivityInvest {
@@ -184,8 +187,8 @@ export function readCReqActivityInvest(reader: BinaryReader): CReqActivityInvest
 
 export interface CRespActivityCommon {
   m_stRetMsg: CCommonRespMsg;
-  m_nActivityId: number;        // UInt32
-  m_nStatus: number;            // UInt16
+  m_nActivityId: number; // UInt32
+  m_nStatus: number; // UInt16
 }
 
 export function writeCRespActivityCommon(writer: BinaryWriter, resp: CRespActivityCommon): void {
@@ -195,20 +198,23 @@ export function writeCRespActivityCommon(writer: BinaryWriter, resp: CRespActivi
 }
 
 export interface CActivityShipRelicsGift {
-  m_nGiftId: number;            // UInt32
-  m_nStatus: number;            // UInt16
+  m_nGiftId: number; // UInt32
+  m_nStatus: number; // UInt16
 }
 
-export function writeCActivityShipRelicsGift(writer: BinaryWriter, gift: CActivityShipRelicsGift): void {
+export function writeCActivityShipRelicsGift(
+  writer: BinaryWriter,
+  gift: CActivityShipRelicsGift,
+): void {
   writer.writeUInt32(gift.m_nGiftId);
   writer.writeUInt16(gift.m_nStatus);
 }
 
 export interface CRespActivityShip {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
-  m_nScore: number;             // UInt32
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_nScore: number; // UInt32
   m_vecRelicsGifts: CActivityShipRelicsGift[];
 }
 
@@ -222,13 +228,16 @@ export function writeCRespActivityShip(writer: BinaryWriter, resp: CRespActivity
 
 export interface CRespActivitySuperRoulette {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
-  m_nSpinCount: number;         // UInt32
-  m_nFreeSpinCount: number;     // UInt16
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_nSpinCount: number; // UInt32
+  m_nFreeSpinCount: number; // UInt16
 }
 
-export function writeCRespActivitySuperRoulette(writer: BinaryWriter, resp: CRespActivitySuperRoulette): void {
+export function writeCRespActivitySuperRoulette(
+  writer: BinaryWriter,
+  resp: CRespActivitySuperRoulette,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt64(resp.m_nStartTime);
   writer.writeUInt64(resp.m_nEndTime);
@@ -238,13 +247,16 @@ export function writeCRespActivitySuperRoulette(writer: BinaryWriter, resp: CRes
 
 export interface CRespActivityContinueGift {
   m_stRetMsg: CCommonRespMsg;
-  m_nDays: number;              // UInt16
-  m_nRewardBits: bigint;        // UInt64
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nDays: number; // UInt16
+  m_nRewardBits: bigint; // UInt64
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
 }
 
-export function writeCRespActivityContinueGift(writer: BinaryWriter, resp: CRespActivityContinueGift): void {
+export function writeCRespActivityContinueGift(
+  writer: BinaryWriter,
+  resp: CRespActivityContinueGift,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt16(resp.m_nDays);
   writer.writeUInt64(resp.m_nRewardBits);
@@ -254,8 +266,8 @@ export function writeCRespActivityContinueGift(writer: BinaryWriter, resp: CResp
 
 export interface CRespActivityInvest {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
   m_vecInvestData: CActivityInvestData[];
 }
 
@@ -271,10 +283,10 @@ export function writeCRespActivityInvest(writer: BinaryWriter, resp: CRespActivi
 // =============================================================================
 
 export interface STReqActivityGiftTower {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
-  m_nId: number;                // UInt32
-  m_nNum: number;               // UInt32
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
+  m_nId: number; // UInt32
+  m_nNum: number; // UInt32
 }
 
 export function readSTReqActivityGiftTower(reader: BinaryReader): STReqActivityGiftTower {
@@ -287,9 +299,9 @@ export function readSTReqActivityGiftTower(reader: BinaryReader): STReqActivityG
 }
 
 export interface STReqActivityBingo {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nId: number;                // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nId: number; // UInt16
 }
 
 export function readSTReqActivityBingo(reader: BinaryReader): STReqActivityBingo {
@@ -301,9 +313,9 @@ export function readSTReqActivityBingo(reader: BinaryReader): STReqActivityBingo
 }
 
 export interface STReqActivityMining {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nBlockId: number;           // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nBlockId: number; // UInt16
 }
 
 export function readSTReqActivityMining(reader: BinaryReader): STReqActivityMining {
@@ -315,9 +327,9 @@ export function readSTReqActivityMining(reader: BinaryReader): STReqActivityMini
 }
 
 export interface STReqActivityPiggyBank {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nBankId: number;            // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nBankId: number; // UInt16
 }
 
 export function readSTReqActivityPiggyBank(reader: BinaryReader): STReqActivityPiggyBank {
@@ -333,10 +345,10 @@ export function readSTReqActivityPiggyBank(reader: BinaryReader): STReqActivityP
 // =============================================================================
 
 export interface STCommonQuickBuyData {
-  m_nItemId: number;            // UInt32
-  m_nBuyTimes: number;          // UInt32
-  m_nBuyTimesLimit: number;     // UInt32
-  m_nBuyPrice: number;          // UInt32
+  m_nItemId: number; // UInt32
+  m_nBuyTimes: number; // UInt32
+  m_nBuyTimesLimit: number; // UInt32
+  m_nBuyPrice: number; // UInt32
 }
 
 export function writeSTCommonQuickBuyData(writer: BinaryWriter, data: STCommonQuickBuyData): void {
@@ -346,63 +358,77 @@ export function writeSTCommonQuickBuyData(writer: BinaryWriter, data: STCommonQu
   writer.writeUInt32(data.m_nBuyPrice);
 }
 
-export interface STAutoDeleteActivityItem {
-  // Dictionary is complex - simplified as empty for now
-}
+// biome-ignore lint/complexity/noBannedTypes: Protocol placeholder for unknown structure
+export type STAutoDeleteActivityItem = {};
 
-export function writeSTAutoDeleteActivityItem(writer: BinaryWriter, item: STAutoDeleteActivityItem): void {
+export function writeSTAutoDeleteActivityItem(
+  writer: BinaryWriter,
+  _item: STAutoDeleteActivityItem,
+): void {
   // Write empty dictionary placeholder
   writer.writeUInt16(0); // count = 0
 }
 
 export interface STActivityGiftTowerGift {
-  m_vecGiftData: any[];
+  m_vecGiftData: unknown[];
 }
 
-export function writeSTActivityGiftTowerGift(writer: BinaryWriter, gift: STActivityGiftTowerGift): void {
+export function writeSTActivityGiftTowerGift(
+  writer: BinaryWriter,
+  gift: STActivityGiftTowerGift,
+): void {
   writer.writeArray(gift.m_vecGiftData, () => {});
 }
 
 export interface STActivityGiftTowerTask {
-  m_vecTaskData: any[];
+  m_vecTaskData: unknown[];
 }
 
-export function writeSTActivityGiftTowerTask(writer: BinaryWriter, task: STActivityGiftTowerTask): void {
+export function writeSTActivityGiftTowerTask(
+  writer: BinaryWriter,
+  task: STActivityGiftTowerTask,
+): void {
   writer.writeArray(task.m_vecTaskData, () => {});
 }
 
 export interface STActivityGiftTowerShop {
-  m_vecShopData: any[];
+  m_vecShopData: unknown[];
 }
 
-export function writeSTActivityGiftTowerShop(writer: BinaryWriter, shop: STActivityGiftTowerShop): void {
+export function writeSTActivityGiftTowerShop(
+  writer: BinaryWriter,
+  shop: STActivityGiftTowerShop,
+): void {
   writer.writeArray(shop.m_vecShopData, () => {});
 }
 
 export interface STRespActivityGiftTower {
   m_stRetMsg: CCommonRespMsg;
-  m_nTag: number;               // UInt32
-  m_nStartTime: bigint;         // UInt64
-  m_nGameEndTime: bigint;       // UInt64
-  m_nRewardEndTime: bigint;     // UInt64
-  m_nEndTime: bigint;           // UInt64
-  m_nOpenGameLevel: number;     // UInt32
-  m_nProgressValue: number;     // UInt32
+  m_nTag: number; // UInt32
+  m_nStartTime: bigint; // UInt64
+  m_nGameEndTime: bigint; // UInt64
+  m_nRewardEndTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_nOpenGameLevel: number; // UInt32
+  m_nProgressValue: number; // UInt32
   m_nProgressRewardBits: number; // UInt32
-  m_nRewardTowerLayer: number;  // UInt32
-  m_nTowerHeight: number;       // UInt32
-  m_nTowerFinishNum: number;    // UInt32
+  m_nRewardTowerLayer: number; // UInt32
+  m_nTowerHeight: number; // UInt32
+  m_nTowerFinishNum: number; // UInt32
   m_stQuickBuy: STCommonQuickBuyData;
   m_stAutoDeleteActivityItem: STAutoDeleteActivityItem;
   m_stGift: STActivityGiftTowerGift;
   m_stTask: STActivityGiftTowerTask;
   m_stShop: STActivityGiftTowerShop;
-  m_nDailyTime: bigint;         // UInt64
-  m_nTowerGroup: number;        // UInt32
-  m_nTowerld: number;           // UInt32
+  m_nDailyTime: bigint; // UInt64
+  m_nTowerGroup: number; // UInt32
+  m_nTowerld: number; // UInt32
 }
 
-export function writeSTRespActivityGiftTower(writer: BinaryWriter, resp: STRespActivityGiftTower): void {
+export function writeSTRespActivityGiftTower(
+  writer: BinaryWriter,
+  resp: STRespActivityGiftTower,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt32(resp.m_nTag);
   writer.writeUInt64(resp.m_nStartTime);
@@ -430,16 +456,19 @@ export function writeSTRespActivityGiftTower(writer: BinaryWriter, resp: STRespA
 
 export interface STRespActivityPiggyBank {
   m_stRetMsg: CCommonRespMsg;
-  m_nDailyTime: bigint;         // UInt64
-  m_nBeginTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
-  m_nFreeRewardStatus: number;  // UInt16
-  m_nBuyBankID: number;         // UInt16
-  m_nTotalBattle: number;       // UInt32
-  m_nTag: number;               // UInt16
+  m_nDailyTime: bigint; // UInt64
+  m_nBeginTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_nFreeRewardStatus: number; // UInt16
+  m_nBuyBankID: number; // UInt16
+  m_nTotalBattle: number; // UInt32
+  m_nTag: number; // UInt16
 }
 
-export function writeSTRespActivityPiggyBank(writer: BinaryWriter, resp: STRespActivityPiggyBank): void {
+export function writeSTRespActivityPiggyBank(
+  writer: BinaryWriter,
+  resp: STRespActivityPiggyBank,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt64(resp.m_nDailyTime);
   writer.writeUInt64(resp.m_nBeginTime);

@@ -1,26 +1,26 @@
 /**
  * Login Packet Tests
- * 
+ *
  * Run: bun test protocol/login.test.ts
  */
 
-import { expect, test, describe } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { BinaryReader, BinaryWriter } from "../../protocol/binary";
 import {
+  createDefaultLoginResponse,
   readCUserLoginPacket,
   writeCRespUserLoginPacket,
-  createDefaultLoginResponse,
 } from "../../protocol/login";
 
 describe("CUserLoginPacket", () => {
   test("reads login request correctly", () => {
     const writer = new BinaryWriter();
-    writer.writeUInt32(12345);   // m_nTransID
+    writer.writeUInt32(12345); // m_nTransID
     writer.writeString("android"); // m_strPlatform
-    
+
     const reader = new BinaryReader(writer.toBytes());
     const packet = readCUserLoginPacket(reader);
-    
+
     expect(packet.m_nTransID).toBe(12345);
     expect(packet.m_strPlatform).toBe("android");
   });
@@ -29,7 +29,7 @@ describe("CUserLoginPacket", () => {
 describe("CRespUserLoginPacket", () => {
   test("creates default response with expected values", () => {
     const resp = createDefaultLoginResponse(12345);
-    
+
     expect(resp.m_nTransID).toBe(12345);
     expect(resp.m_nCoins).toBe(199);
     expect(resp.m_nDiamonds).toBe(120);
@@ -42,10 +42,10 @@ describe("CRespUserLoginPacket", () => {
   test("serializes to bytes without error", () => {
     const resp = createDefaultLoginResponse(12345);
     const writer = new BinaryWriter();
-    
+
     // Should not throw
     expect(() => writeCRespUserLoginPacket(writer, resp)).not.toThrow();
-    
+
     // Should produce output
     const bytes = writer.toBytes();
     expect(bytes.length).toBeGreaterThan(100);

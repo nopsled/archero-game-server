@@ -1,20 +1,20 @@
 /**
  * Additional Activity Protocol Packets
- * 
+ *
  * Missing request and response packets for various game activities.
  */
 
-import { BinaryReader, BinaryWriter } from "./binary";
-import { CCommonRespMsg, writeCCommonRespMsg, createSuccessResponse } from "./common";
+import type { BinaryReader, BinaryWriter } from "./binary";
+import { type CCommonRespMsg, writeCCommonRespMsg } from "./common";
 
 // =============================================================================
 // ADDITIONAL ACTIVITY REQUESTS
 // =============================================================================
 
 export interface CReqActivityBackReward {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nRewardId: number;          // UInt32
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nRewardId: number; // UInt32
 }
 
 export function readCReqActivityBackReward(reader: BinaryReader): CReqActivityBackReward {
@@ -26,9 +26,9 @@ export function readCReqActivityBackReward(reader: BinaryReader): CReqActivityBa
 }
 
 export interface CReqActivityChainGift {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nGiftId: number;            // UInt32
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nGiftId: number; // UInt32
 }
 
 export function readCReqActivityChainGift(reader: BinaryReader): CReqActivityChainGift {
@@ -40,9 +40,9 @@ export function readCReqActivityChainGift(reader: BinaryReader): CReqActivityCha
 }
 
 export interface CReqActivityChainGiftNew {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nGiftId: number;            // UInt32
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nGiftId: number; // UInt32
 }
 
 export function readCReqActivityChainGiftNew(reader: BinaryReader): CReqActivityChainGiftNew {
@@ -54,8 +54,8 @@ export function readCReqActivityChainGiftNew(reader: BinaryReader): CReqActivity
 }
 
 export interface CReqActivityDropRate {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readCReqActivityDropRate(reader: BinaryReader): CReqActivityDropRate {
@@ -66,9 +66,9 @@ export function readCReqActivityDropRate(reader: BinaryReader): CReqActivityDrop
 }
 
 export interface CReqActivityEmploy {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nEmployId: number;          // UInt32
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nEmployId: number; // UInt32
 }
 
 export function readCReqActivityEmploy(reader: BinaryReader): CReqActivityEmploy {
@@ -80,11 +80,11 @@ export function readCReqActivityEmploy(reader: BinaryReader): CReqActivityEmploy
 }
 
 export interface CReqActivityGrowth {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nRewardId: number;          // UInt32
-  m_nRewardIndex: number;       // UInt32
-  m_strExtra: string | null;    // String
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nRewardId: number; // UInt32
+  m_nRewardIndex: number; // UInt32
+  m_strExtra: string | null; // String
 }
 
 export function readCReqActivityGrowth(reader: BinaryReader): CReqActivityGrowth {
@@ -98,9 +98,9 @@ export function readCReqActivityGrowth(reader: BinaryReader): CReqActivityGrowth
 }
 
 export interface CReqActivityLuckyWheel {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nNum: number;               // UInt16
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nNum: number; // UInt16
 }
 
 export function readCReqActivityLuckyWheel(reader: BinaryReader): CReqActivityLuckyWheel {
@@ -117,21 +117,27 @@ export function readCReqActivityLuckyWheel(reader: BinaryReader): CReqActivityLu
 
 export interface CRespActivityBackReward {
   m_stRetMsg: CCommonRespMsg;
-  m_nRewardBits: bigint;        // UInt64
+  m_nRewardBits: bigint; // UInt64
 }
 
-export function writeCRespActivityBackReward(writer: BinaryWriter, resp: CRespActivityBackReward): void {
+export function writeCRespActivityBackReward(
+  writer: BinaryWriter,
+  resp: CRespActivityBackReward,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt64(resp.m_nRewardBits);
 }
 
 export interface CRespActivityChainGift {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
 }
 
-export function writeCRespActivityChainGift(writer: BinaryWriter, resp: CRespActivityChainGift): void {
+export function writeCRespActivityChainGift(
+  writer: BinaryWriter,
+  resp: CRespActivityChainGift,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt64(resp.m_nStartTime);
   writer.writeUInt64(resp.m_nEndTime);
@@ -139,11 +145,14 @@ export function writeCRespActivityChainGift(writer: BinaryWriter, resp: CRespAct
 
 export interface CRespActivityChainGiftNew {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
 }
 
-export function writeCRespActivityChainGiftNew(writer: BinaryWriter, resp: CRespActivityChainGiftNew): void {
+export function writeCRespActivityChainGiftNew(
+  writer: BinaryWriter,
+  resp: CRespActivityChainGiftNew,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt64(resp.m_nStartTime);
   writer.writeUInt64(resp.m_nEndTime);
@@ -151,12 +160,15 @@ export function writeCRespActivityChainGiftNew(writer: BinaryWriter, resp: CResp
 
 export interface CRespActivityDiamondChoice {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
-  m_vecChoices: number[];       // UInt16[]
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
+  m_vecChoices: number[]; // UInt16[]
 }
 
-export function writeCRespActivityDiamondChoice(writer: BinaryWriter, resp: CRespActivityDiamondChoice): void {
+export function writeCRespActivityDiamondChoice(
+  writer: BinaryWriter,
+  resp: CRespActivityDiamondChoice,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt64(resp.m_nStartTime);
   writer.writeUInt64(resp.m_nEndTime);
@@ -165,11 +177,14 @@ export function writeCRespActivityDiamondChoice(writer: BinaryWriter, resp: CRes
 
 export interface CRespActivityDropRate {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
 }
 
-export function writeCRespActivityDropRate(writer: BinaryWriter, resp: CRespActivityDropRate): void {
+export function writeCRespActivityDropRate(
+  writer: BinaryWriter,
+  resp: CRespActivityDropRate,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt64(resp.m_nStartTime);
   writer.writeUInt64(resp.m_nEndTime);
@@ -177,8 +192,8 @@ export function writeCRespActivityDropRate(writer: BinaryWriter, resp: CRespActi
 
 export interface CRespActivityEmploy {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
 }
 
 export function writeCRespActivityEmploy(writer: BinaryWriter, resp: CRespActivityEmploy): void {
@@ -189,17 +204,20 @@ export function writeCRespActivityEmploy(writer: BinaryWriter, resp: CRespActivi
 
 export interface CRespActivityExchange {
   m_stRetMsg: CCommonRespMsg;
-  m_nRequestType: number;       // UInt16
-  m_nEndTime: bigint;           // UInt64
-  m_strDropItems: string;       // String
-  m_nIndex: number;             // UInt16
-  m_nCount: number;             // Int16
-  m_ntotalCount: number;        // UInt16
-  m_nStartTime: bigint;         // UInt64
-  m_nStyleId: number;           // UInt32
+  m_nRequestType: number; // UInt16
+  m_nEndTime: bigint; // UInt64
+  m_strDropItems: string; // String
+  m_nIndex: number; // UInt16
+  m_nCount: number; // Int16
+  m_ntotalCount: number; // UInt16
+  m_nStartTime: bigint; // UInt64
+  m_nStyleId: number; // UInt32
 }
 
-export function writeCRespActivityExchange(writer: BinaryWriter, resp: CRespActivityExchange): void {
+export function writeCRespActivityExchange(
+  writer: BinaryWriter,
+  resp: CRespActivityExchange,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt16(resp.m_nRequestType);
   writer.writeUInt64(resp.m_nEndTime);
@@ -214,8 +232,8 @@ export function writeCRespActivityExchange(writer: BinaryWriter, resp: CRespActi
 
 export interface CRespActivityGrowth {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
 }
 
 export function writeCRespActivityGrowth(writer: BinaryWriter, resp: CRespActivityGrowth): void {
@@ -226,11 +244,14 @@ export function writeCRespActivityGrowth(writer: BinaryWriter, resp: CRespActivi
 
 export interface CRespActivityLuckyWheel {
   m_stRetMsg: CCommonRespMsg;
-  m_nStartTime: bigint;         // UInt64
-  m_nEndTime: bigint;           // UInt64
+  m_nStartTime: bigint; // UInt64
+  m_nEndTime: bigint; // UInt64
 }
 
-export function writeCRespActivityLuckyWheel(writer: BinaryWriter, resp: CRespActivityLuckyWheel): void {
+export function writeCRespActivityLuckyWheel(
+  writer: BinaryWriter,
+  resp: CRespActivityLuckyWheel,
+): void {
   writeCCommonRespMsg(writer, resp.m_stRetMsg);
   writer.writeUInt64(resp.m_nStartTime);
   writer.writeUInt64(resp.m_nEndTime);
@@ -241,13 +262,13 @@ export function writeCRespActivityLuckyWheel(writer: BinaryWriter, resp: CRespAc
 // =============================================================================
 
 export interface STReqActivityAnniversary {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nPos: number;               // UInt16
-  m_nRewardType: number;        // UInt16
-  m_nTaskId: number;            // UInt16
-  m_nBoxRewardId: number;       // Int32
-  m_nExchangeId: number;        // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nPos: number; // UInt16
+  m_nRewardType: number; // UInt16
+  m_nTaskId: number; // UInt16
+  m_nBoxRewardId: number; // Int32
+  m_nExchangeId: number; // UInt16
 }
 
 export function readSTReqActivityAnniversary(reader: BinaryReader): STReqActivityAnniversary {
@@ -263,8 +284,8 @@ export function readSTReqActivityAnniversary(reader: BinaryReader): STReqActivit
 }
 
 export interface STReqActivityArtifactTrial {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityArtifactTrial(reader: BinaryReader): STReqActivityArtifactTrial {
@@ -275,8 +296,8 @@ export function readSTReqActivityArtifactTrial(reader: BinaryReader): STReqActiv
 }
 
 export interface STReqActivityChargeOnce {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityChargeOnce(reader: BinaryReader): STReqActivityChargeOnce {
@@ -287,8 +308,8 @@ export function readSTReqActivityChargeOnce(reader: BinaryReader): STReqActivity
 }
 
 export interface STReqActivityChargeReward {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityChargeReward(reader: BinaryReader): STReqActivityChargeReward {
@@ -299,9 +320,9 @@ export function readSTReqActivityChargeReward(reader: BinaryReader): STReqActivi
 }
 
 export interface STReqActivityCircleTreasure {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nId: number;                // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nId: number; // UInt16
 }
 
 export function readSTReqActivityCircleTreasure(reader: BinaryReader): STReqActivityCircleTreasure {
@@ -313,9 +334,9 @@ export function readSTReqActivityCircleTreasure(reader: BinaryReader): STReqActi
 }
 
 export interface STReqActivityCommonTurn {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nId: number;                // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nId: number; // UInt16
 }
 
 export function readSTReqActivityCommonTurn(reader: BinaryReader): STReqActivityCommonTurn {
@@ -327,8 +348,8 @@ export function readSTReqActivityCommonTurn(reader: BinaryReader): STReqActivity
 }
 
 export interface STReqActivityCostDiamond {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityCostDiamond(reader: BinaryReader): STReqActivityCostDiamond {
@@ -339,8 +360,8 @@ export function readSTReqActivityCostDiamond(reader: BinaryReader): STReqActivit
 }
 
 export interface STReqActivityCostLife {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityCostLife(reader: BinaryReader): STReqActivityCostLife {
@@ -351,8 +372,8 @@ export function readSTReqActivityCostLife(reader: BinaryReader): STReqActivityCo
 }
 
 export interface STReqActivityCrazyMonth {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityCrazyMonth(reader: BinaryReader): STReqActivityCrazyMonth {
@@ -363,11 +384,13 @@ export function readSTReqActivityCrazyMonth(reader: BinaryReader): STReqActivity
 }
 
 export interface STReqActivityFifthAnniversary {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
-export function readSTReqActivityFifthAnniversary(reader: BinaryReader): STReqActivityFifthAnniversary {
+export function readSTReqActivityFifthAnniversary(
+  reader: BinaryReader,
+): STReqActivityFifthAnniversary {
   return {
     m_nTransID: reader.readUInt32(),
     m_nRequestType: reader.readUInt16(),
@@ -375,8 +398,8 @@ export function readSTReqActivityFifthAnniversary(reader: BinaryReader): STReqAc
 }
 
 export interface STReqActivityGardenTreasure {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityGardenTreasure(reader: BinaryReader): STReqActivityGardenTreasure {
@@ -387,11 +410,11 @@ export function readSTReqActivityGardenTreasure(reader: BinaryReader): STReqActi
 }
 
 export interface STReqActivityLattice {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  vecChoices: number[];         // UInt16[]
-  m_nId: number;                // UInt16
-  m_nExchangeCnt: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  vecChoices: number[]; // UInt16[]
+  m_nId: number; // UInt16
+  m_nExchangeCnt: number; // UInt16
 }
 
 export function readSTReqActivityLattice(reader: BinaryReader): STReqActivityLattice {
@@ -405,8 +428,8 @@ export function readSTReqActivityLattice(reader: BinaryReader): STReqActivityLat
 }
 
 export interface STReqActivityLoginPackage {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityLoginPackage(reader: BinaryReader): STReqActivityLoginPackage {
@@ -417,8 +440,8 @@ export function readSTReqActivityLoginPackage(reader: BinaryReader): STReqActivi
 }
 
 export interface STReqActivityLuckPlinko {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityLuckPlinko(reader: BinaryReader): STReqActivityLuckPlinko {
@@ -429,10 +452,10 @@ export function readSTReqActivityLuckPlinko(reader: BinaryReader): STReqActivity
 }
 
 export interface STReqActivityMagicCrystal {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nId: number;                // UInt16
-  m_nExchangeNum: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nId: number; // UInt16
+  m_nExchangeNum: number; // UInt16
 }
 
 export function readSTReqActivityMagicCrystal(reader: BinaryReader): STReqActivityMagicCrystal {
@@ -445,8 +468,8 @@ export function readSTReqActivityMagicCrystal(reader: BinaryReader): STReqActivi
 }
 
 export interface STReqActivityMineCar {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityMineCar(reader: BinaryReader): STReqActivityMineCar {
@@ -457,13 +480,13 @@ export function readSTReqActivityMineCar(reader: BinaryReader): STReqActivityMin
 }
 
 export interface STReqActivityOpenBox {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nPos: number;               // UInt16
-  m_nRewardType: number;        // UInt16
-  m_nTaskId: number;            // UInt16
-  m_nBoxRewardId: number;       // Int32
-  m_nExchangeId: number;        // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nPos: number; // UInt16
+  m_nRewardType: number; // UInt16
+  m_nTaskId: number; // UInt16
+  m_nBoxRewardId: number; // Int32
+  m_nExchangeId: number; // UInt16
 }
 
 export function readSTReqActivityOpenBox(reader: BinaryReader): STReqActivityOpenBox {
@@ -479,8 +502,8 @@ export function readSTReqActivityOpenBox(reader: BinaryReader): STReqActivityOpe
 }
 
 export interface STReqActivityPayment {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityPayment(reader: BinaryReader): STReqActivityPayment {
@@ -491,8 +514,8 @@ export function readSTReqActivityPayment(reader: BinaryReader): STReqActivityPay
 }
 
 export interface STReqActivityPrivilege {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityPrivilege(reader: BinaryReader): STReqActivityPrivilege {
@@ -503,10 +526,10 @@ export function readSTReqActivityPrivilege(reader: BinaryReader): STReqActivityP
 }
 
 export interface STReqActivityPuzzle {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nTaskId: number;            // UInt16
-  m_nBoxRewardId: number;       // Int32
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nTaskId: number; // UInt16
+  m_nBoxRewardId: number; // Int32
 }
 
 export function readSTReqActivityPuzzle(reader: BinaryReader): STReqActivityPuzzle {
@@ -519,8 +542,8 @@ export function readSTReqActivityPuzzle(reader: BinaryReader): STReqActivityPuzz
 }
 
 export interface STReqActivityRebate {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityRebate(reader: BinaryReader): STReqActivityRebate {
@@ -531,8 +554,8 @@ export function readSTReqActivityRebate(reader: BinaryReader): STReqActivityReba
 }
 
 export interface STReqActivityScratchLottery {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivityScratchLottery(reader: BinaryReader): STReqActivityScratchLottery {
@@ -543,8 +566,8 @@ export function readSTReqActivityScratchLottery(reader: BinaryReader): STReqActi
 }
 
 export interface STReqActivitySevenDays {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
 export function readSTReqActivitySevenDays(reader: BinaryReader): STReqActivitySevenDays {
@@ -555,11 +578,13 @@ export function readSTReqActivitySevenDays(reader: BinaryReader): STReqActivityS
 }
 
 export interface STReqActivitySevenDaysAppend {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
 }
 
-export function readSTReqActivitySevenDaysAppend(reader: BinaryReader): STReqActivitySevenDaysAppend {
+export function readSTReqActivitySevenDaysAppend(
+  reader: BinaryReader,
+): STReqActivitySevenDaysAppend {
   return {
     m_nTransID: reader.readUInt32(),
     m_nRequestType: reader.readUInt16(),
@@ -567,13 +592,15 @@ export function readSTReqActivitySevenDaysAppend(reader: BinaryReader): STReqAct
 }
 
 export interface STReqActivitySixthAnniversary {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nId: number;                // Int32
-  m_nNum: number;               // UInt16
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nId: number; // Int32
+  m_nNum: number; // UInt16
 }
 
-export function readSTReqActivitySixthAnniversary(reader: BinaryReader): STReqActivitySixthAnniversary {
+export function readSTReqActivitySixthAnniversary(
+  reader: BinaryReader,
+): STReqActivitySixthAnniversary {
   return {
     m_nType: reader.readUInt16(),
     m_nTransID: reader.readUInt32(),
@@ -583,10 +610,10 @@ export function readSTReqActivitySixthAnniversary(reader: BinaryReader): STReqAc
 }
 
 export interface STReqActivityTreasure {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nId: number;                // UInt16
-  m_nIndex: number;             // UInt16
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nId: number; // UInt16
+  m_nIndex: number; // UInt16
 }
 
 export function readSTReqActivityTreasure(reader: BinaryReader): STReqActivityTreasure {
@@ -599,9 +626,9 @@ export function readSTReqActivityTreasure(reader: BinaryReader): STReqActivityTr
 }
 
 export interface STReqActivityWish {
-  m_nTransID: number;           // UInt32
-  m_nRequestType: number;       // UInt16
-  m_nId: number;                // UInt16
+  m_nTransID: number; // UInt32
+  m_nRequestType: number; // UInt16
+  m_nId: number; // UInt16
 }
 
 export function readSTReqActivityWish(reader: BinaryReader): STReqActivityWish {
@@ -621,7 +648,7 @@ export function readSTReqActivityWish(reader: BinaryReader): STReqActivityWish {
  * Sent with most responses to update player state
  */
 export interface STCommonData {
-  m_nChange: boolean;           // Boolean - if false, skip reading rest
+  m_nChange: boolean; // Boolean - if false, skip reading rest
   // When m_nChange is false, the rest is not serialized
 }
 

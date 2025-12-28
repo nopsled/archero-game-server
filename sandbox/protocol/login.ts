@@ -1,34 +1,34 @@
 /**
  * Login Protocol Packets
- * 
+ *
  * Request: CUserLoginPacket
  * Response: CRespUserLoginPacket
- * 
+ *
  * Based on captured field data from protocol discovery.
  */
 
-import { BinaryReader, BinaryWriter } from "./binary";
+import type { BinaryReader, BinaryWriter } from "./binary";
 import {
-  CEquipmentItem,
-  writeCEquipmentItem,
-  createDefaultEquipmentItem,
-  CHeroItem,
-  writeCHeroItem,
-  createDefaultHero,
-  CRestoreItem,
-  writeCRestoreItem,
-  createDefaultRestoreItem,
-  CTimestampItem,
-  writeCTimestampItem,
-  CBoxAssuranceItem,
-  writeCBoxAssuranceItem,
+  type CArtifact,
+  type CBoxAssuranceItem,
+  type CEquipmentItem,
+  type CHeroItem,
+  type CRestoreItem,
+  type CTimestampItem,
   createDefaultBoxAssurance,
-  STPetInfo,
-  writeSTPetInfo,
-  STHeadItem,
-  writeSTHeadItem,
-  CArtifact,
+  createDefaultEquipmentItem,
+  createDefaultHero,
+  createDefaultRestoreItem,
+  type STHeadItem,
+  type STPetInfo,
   writeCArtifact,
+  writeCBoxAssuranceItem,
+  writeCEquipmentItem,
+  writeCHeroItem,
+  writeCRestoreItem,
+  writeCTimestampItem,
+  writeSTHeadItem,
+  writeSTPetInfo,
 } from "./common";
 
 // =============================================================================
@@ -39,8 +39,8 @@ import {
  * CUserLoginPacket - Login request from client
  */
 export interface CUserLoginPacket {
-  m_nTransID: number;      // UInt32
-  m_strPlatform: string;   // String - "android" or "ios"
+  m_nTransID: number; // UInt32
+  m_strPlatform: string; // String - "android" or "ios"
 }
 
 export function readCUserLoginPacket(reader: BinaryReader): CUserLoginPacket {
@@ -60,151 +60,151 @@ export function readCUserLoginPacket(reader: BinaryReader): CUserLoginPacket {
  */
 export interface CRespUserLoginPacket {
   // Core player data
-  m_nTransID: number;              // UInt32
-  m_nCoins: number;                // UInt32
-  m_nDiamonds: number;             // Int32
-  m_nLevel: number;                // UInt16
-  m_nExperince: number;            // UInt32
-  m_nUserRawId: bigint;            // UInt64
-  m_nNowTime: bigint;              // UInt64 - current server time
-  m_nTodayEndTimestamp: bigint;    // UInt64 - end of day
+  m_nTransID: number; // UInt32
+  m_nCoins: number; // UInt32
+  m_nDiamonds: number; // Int32
+  m_nLevel: number; // UInt16
+  m_nExperince: number; // UInt32
+  m_nUserRawId: bigint; // UInt64
+  m_nNowTime: bigint; // UInt64 - current server time
+  m_nTodayEndTimestamp: bigint; // UInt64 - end of day
 
   // Progress data
-  m_nMaxLayer: number;             // UInt16
-  m_nLayerBoxID: number;           // UInt16
-  m_nTreasureRandomCount: number;  // UInt32
-  m_nBattleRebornCount: number;    // UInt16
-  
+  m_nMaxLayer: number; // UInt16
+  m_nLayerBoxID: number; // UInt16
+  m_nTreasureRandomCount: number; // UInt32
+  m_nBattleRebornCount: number; // UInt16
+
   // Account info
-  m_strUserAccessToken: string;    // String
-  m_strNickName: string;           // String
-  m_nAccountStatus: number;        // UInt16
-  
+  m_strUserAccessToken: string; // String
+  m_strNickName: string; // String
+  m_nAccountStatus: number; // UInt16
+
   // Items data
-  m_nExtraNormalDiamondItem: number;  // UInt16
-  m_nExtraLargeDiamondItem: number;   // UInt16
-  m_nLargeDiamondItemCount: number;   // UInt16
-  
+  m_nExtraNormalDiamondItem: number; // UInt16
+  m_nExtraLargeDiamondItem: number; // UInt16
+  m_nLargeDiamondItemCount: number; // UInt16
+
   // Game system flags
-  m_nGameSystemMask: bigint;       // UInt64
+  m_nGameSystemMask: bigint; // UInt64
 
   // Hero layer
-  m_nMaxHeroLayer: number;         // UInt16
-  m_nHeroLayerBoxID: number;       // UInt16
+  m_nMaxHeroLayer: number; // UInt16
+  m_nHeroLayerBoxID: number; // UInt16
 
   // Cash/monetization
-  m_nTotalCash: number;            // UInt32
-  m_bTalentBackCoin: boolean;      // Boolean
+  m_nTotalCash: number; // UInt32
+  m_bTalentBackCoin: boolean; // Boolean
 
   // Ads
-  m_nAdCount: number;              // UInt16
+  m_nAdCount: number; // UInt16
 
   // Email binding
-  m_strBindEmailAddress: string;   // String
+  m_strBindEmailAddress: string; // String
 
   // Activity recharge
   vecActivityRechargeResetType: number[]; // UInt16[]
 
   // Skins
-  m_bHeroSkinItemIsBuy: boolean;   // Boolean
+  m_bHeroSkinItemIsBuy: boolean; // Boolean
   m_bHeroSkinSeniorItemIsBuy: boolean; // Boolean
-  m_strSkinItemIapProductId: string;   // String
+  m_strSkinItemIapProductId: string; // String
 
   // Profile
-  m_nHeadIcon: number;             // UInt32
-  m_nHeadFrame: number;            // UInt32
-  m_nHeadFrameTimestamp: bigint;   // UInt64
+  m_nHeadIcon: number; // UInt32
+  m_nHeadFrame: number; // UInt32
+  m_nHeadFrameTimestamp: bigint; // UInt64
 
   // IDFA
-  m_bOpenIdfa: boolean;            // Boolean
+  m_bOpenIdfa: boolean; // Boolean
 
   // Rename
-  m_nRemameDiamonds: number;       // UInt32
-  m_nRenameCount: number;          // UInt16
+  m_nRemameDiamonds: number; // UInt32
+  m_nRenameCount: number; // UInt16
 
   // Chapter fail counts
-  m_nChapFailCnt: number;          // UInt16
-  m_nHeroChapFailCnt: number;      // UInt16
+  m_nChapFailCnt: number; // UInt16
+  m_nHeroChapFailCnt: number; // UInt16
 
   // Purchase data
-  m_nPurcahseInTowWeeks: number;   // UInt32
-  m_nLatest3PurchaseAvg: number;   // UInt32
+  m_nPurcahseInTowWeeks: number; // UInt32
+  m_nLatest3PurchaseAvg: number; // UInt32
 
   // Mix box
-  m_nMixBoxItem: number;           // UInt16
-  m_nMixBoxSingleCount: number;    // UInt16
+  m_nMixBoxItem: number; // UInt16
+  m_nMixBoxSingleCount: number; // UInt16
   m_nMixBoxSingleTotalCount: number; // UInt16
-  m_nMixBoxTenCount: number;       // UInt16
+  m_nMixBoxTenCount: number; // UInt16
 
   // Dragon box
-  m_nDragonBoxItem: number;        // UInt16
-  m_nDragonBoxCountLow: number;    // UInt16
-  m_nDragonBoxCountMid: number;    // UInt16
-  m_nDragonBoxCountHigh: number;   // UInt16
+  m_nDragonBoxItem: number; // UInt16
+  m_nDragonBoxCountLow: number; // UInt16
+  m_nDragonBoxCountMid: number; // UInt16
+  m_nDragonBoxCountHigh: number; // UInt16
 
   // Free coin
-  m_nFreeCoinTimestamp: bigint;    // UInt64
+  m_nFreeCoinTimestamp: bigint; // UInt64
 
   // VIP
-  m_nVipLevel: number;             // UInt16
-  m_nVipScore: number;             // UInt32
+  m_nVipLevel: number; // UInt16
+  m_nVipScore: number; // UInt32
 
   // Bans
-  m_nChapterBanTimestamp: bigint;  // UInt64
+  m_nChapterBanTimestamp: bigint; // UInt64
 
   // Relics box
-  m_nRelicsBoxItem: number;        // UInt16
-  m_nRelicsBoxCountLow: number;    // UInt16
-  m_nRelicsBoxCountHigh: number;   // UInt16
+  m_nRelicsBoxItem: number; // UInt16
+  m_nRelicsBoxCountLow: number; // UInt16
+  m_nRelicsBoxCountHigh: number; // UInt16
 
   // Offline battle
-  m_nOfflineBattleCount: number;   // UInt16
+  m_nOfflineBattleCount: number; // UInt16
 
   // Equip S box
-  m_nEquipSBoxItem: number;        // UInt16
-  m_nEquipSBoxCountLow: number;    // UInt16
-  m_nEquipSBoxCountHigh: number;   // UInt16
+  m_nEquipSBoxItem: number; // UInt16
+  m_nEquipSBoxCountLow: number; // UInt16
+  m_nEquipSBoxCountHigh: number; // UInt16
 
   // Worker box
-  m_nWorkerBoxKeyCount: number;    // UInt32
-  m_nWorkerBoxCountLow: number;    // UInt16
-  m_nWorkerBoxCountMid: number;    // UInt16
-  m_nWorkerBoxCountHigh: number;   // UInt16
+  m_nWorkerBoxKeyCount: number; // UInt32
+  m_nWorkerBoxCountLow: number; // UInt16
+  m_nWorkerBoxCountMid: number; // UInt16
+  m_nWorkerBoxCountHigh: number; // UInt16
 
   // Pet box
-  m_nPetBoxKeyCount: number;       // UInt32
-  m_nPetBoxCountLow: number;       // UInt16
-  m_nPetBoxCountMid: number;       // UInt16
-  m_nPetBoxCountHigh: number;      // UInt16
+  m_nPetBoxKeyCount: number; // UInt32
+  m_nPetBoxCountLow: number; // UInt16
+  m_nPetBoxCountMid: number; // UInt16
+  m_nPetBoxCountHigh: number; // UInt16
 
   // Habby ID
-  m_strHabbyID: string;            // String
+  m_strHabbyID: string; // String
 
   // Must drop
-  m_nMustDropMask: bigint;         // UInt64
+  m_nMustDropMask: bigint; // UInt64
 
   // Guild
-  m_nGuildStopTimestamp: bigint;   // UInt64
+  m_nGuildStopTimestamp: bigint; // UInt64
 
   // Star diamond
-  m_nStarDiamond: number;          // UInt32
+  m_nStarDiamond: number; // UInt32
 
   // Extended experience/coins
-  m_nExperinceInt64: bigint;       // UInt64
-  m_nCoinsInt64: bigint;           // Int64
+  m_nExperinceInt64: bigint; // UInt64
+  m_nCoinsInt64: bigint; // Int64
 
   // Imprint box
-  m_nImprintBoxKeyCount: number;   // UInt32
+  m_nImprintBoxKeyCount: number; // UInt32
 
   // Hell layer
-  m_nMaxHellLayer: number;         // UInt16
-  m_nHellLayerBoxID: number;       // UInt16
-  m_nChapHellFailCount: number;    // UInt16
+  m_nMaxHellLayer: number; // UInt16
+  m_nHellLayerBoxID: number; // UInt16
+  m_nChapHellFailCount: number; // UInt16
 
   // Other
-  m_nUpgradeLevel: number;         // UInt16
-  m_nCardThemeId: number;          // UInt32
-  m_nCardThemeTimestamp: bigint;   // UInt64
+  m_nUpgradeLevel: number; // UInt16
+  m_nCardThemeId: number; // UInt32
+  m_nCardThemeTimestamp: bigint; // UInt64
 
   // Arrays
   m_arrayEquipData: CEquipmentItem[];
@@ -330,7 +330,7 @@ export function createDefaultLoginResponse(transId: number): CRespUserLoginPacke
     m_nDiamonds: 120,
     m_nLevel: 1,
     m_nExperince: 0,
-    m_nUserRawId: BigInt("72276397022577740"),  // Random large ID
+    m_nUserRawId: BigInt("72276397022577740"), // Random large ID
     m_nNowTime: now,
     m_nTodayEndTimestamp: todayEnd,
     m_nMaxLayer: 0,
@@ -407,11 +407,11 @@ export function createDefaultLoginResponse(transId: number): CRespUserLoginPacke
 
     // Arrays - starter equipment and hero
     m_arrayEquipData: [
-      createDefaultEquipmentItem("10909050", 10000),   // Basic bow
+      createDefaultEquipmentItem("10909050", 10000), // Basic bow
       createDefaultEquipmentItem("10909051", 1010101), // Basic armor
     ],
     m_arrayRestoreData: [
-      createDefaultRestoreItem(45, 20),  // Keys
+      createDefaultRestoreItem(45, 20), // Keys
       createDefaultRestoreItem(0, 1),
       createDefaultRestoreItem(0, 1),
       createDefaultRestoreItem(4, 4),

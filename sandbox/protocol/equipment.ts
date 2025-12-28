@@ -1,21 +1,21 @@
 /**
  * Equipment Protocol Packets
- * 
+ *
  * Equipment, weapons, relics, and related structures.
  */
 
-import { BinaryReader, BinaryWriter } from "./binary";
-import { CCommonRespMsg, writeCCommonRespMsg, createSuccessResponse } from "./common";
+import type { BinaryReader, BinaryWriter } from "./binary";
+import { type CCommonRespMsg, writeCCommonRespMsg } from "./common";
 
 // =============================================================================
 // EQUIPMENT REQUESTS
 // =============================================================================
 
 export interface CReqEquipWear {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
-  m_nEquipUniqueId: bigint;     // UInt64
-  m_nSlotId: number;            // UInt16
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
+  m_nEquipUniqueId: bigint; // UInt64
+  m_nSlotId: number; // UInt16
 }
 
 export function readCReqEquipWear(reader: BinaryReader): CReqEquipWear {
@@ -28,9 +28,9 @@ export function readCReqEquipWear(reader: BinaryReader): CReqEquipWear {
 }
 
 export interface CReqEquipTotem {
-  m_nTransID: number;           // UInt32
-  m_nType: number;              // UInt16
-  m_nTotemId: number;           // UInt32
+  m_nTransID: number; // UInt32
+  m_nType: number; // UInt16
+  m_nTotemId: number; // UInt32
 }
 
 export function readCReqEquipTotem(reader: BinaryReader): CReqEquipTotem {
@@ -42,13 +42,13 @@ export function readCReqEquipTotem(reader: BinaryReader): CReqEquipTotem {
 }
 
 export interface CEquipRefine {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nPosId: number;             // UInt16
-  m_nCarvingId: number;         // UInt32
-  m_nCarvingIdx: number;        // UInt16
-  arrayEquipId: bigint[];       // UInt64[]
-  vecCompositeId: number[];     // UInt32[]
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nPosId: number; // UInt16
+  m_nCarvingId: number; // UInt32
+  m_nCarvingIdx: number; // UInt16
+  arrayEquipId: bigint[]; // UInt64[]
+  vecCompositeId: number[]; // UInt32[]
 }
 
 export function readCEquipRefine(reader: BinaryReader): CEquipRefine {
@@ -69,8 +69,8 @@ export function readCEquipRefine(reader: BinaryReader): CEquipRefine {
 
 export interface CRespEquipWear {
   m_stRetMsg: CCommonRespMsg;
-  m_nEquipUniqueId: bigint;     // UInt64
-  m_nSlotId: number;            // UInt16
+  m_nEquipUniqueId: bigint; // UInt64
+  m_nSlotId: number; // UInt16
 }
 
 export function writeCRespEquipWear(writer: BinaryWriter, resp: CRespEquipWear): void {
@@ -81,7 +81,7 @@ export function writeCRespEquipWear(writer: BinaryWriter, resp: CRespEquipWear):
 
 export interface CRespEquipTotem {
   m_stRetMsg: CCommonRespMsg;
-  m_nTotemId: number;           // UInt32
+  m_nTotemId: number; // UInt32
 }
 
 export function writeCRespEquipTotem(writer: BinaryWriter, resp: CRespEquipTotem): void {
@@ -91,7 +91,7 @@ export function writeCRespEquipTotem(writer: BinaryWriter, resp: CRespEquipTotem
 
 export interface CRespEquipRefine {
   m_stRetMsg: CCommonRespMsg;
-  m_nResult: number;            // UInt16
+  m_nResult: number; // UInt16
 }
 
 export function writeCRespEquipRefine(writer: BinaryWriter, resp: CRespEquipRefine): void {
@@ -104,10 +104,10 @@ export function writeCRespEquipRefine(writer: BinaryWriter, resp: CRespEquipRefi
 // =============================================================================
 
 export interface CReqHeroSkin {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nSkinId: number;            // UInt32
-  m_nNum: number;               // UInt32
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nSkinId: number; // UInt32
+  m_nNum: number; // UInt32
 }
 
 export function readCReqHeroSkin(reader: BinaryReader): CReqHeroSkin {
@@ -120,9 +120,9 @@ export function readCReqHeroSkin(reader: BinaryReader): CReqHeroSkin {
 }
 
 export interface CHeroSkin {
-  m_nSkinId: number;            // UInt32
-  m_nLevel: number;             // UInt16
-  m_bIsOwned: boolean;          // Boolean
+  m_nSkinId: number; // UInt32
+  m_nLevel: number; // UInt16
+  m_bIsOwned: boolean; // Boolean
 }
 
 export function writeCHeroSkin(writer: BinaryWriter, skin: CHeroSkin): void {
@@ -146,9 +146,9 @@ export function writeCRespHeroSkin(writer: BinaryWriter, resp: CRespHeroSkin): v
 // =============================================================================
 
 export interface CReqWeaponSkin {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nSkinId: number;            // UInt32
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nSkinId: number; // UInt32
 }
 
 export function readCReqWeaponSkin(reader: BinaryReader): CReqWeaponSkin {
@@ -161,7 +161,7 @@ export function readCReqWeaponSkin(reader: BinaryReader): CReqWeaponSkin {
 
 export interface CRespWeaponSkin {
   m_stRetMsg: CCommonRespMsg;
-  m_nSkinId: number;            // UInt32
+  m_nSkinId: number; // UInt32
 }
 
 export function writeCRespWeaponSkin(writer: BinaryWriter, resp: CRespWeaponSkin): void {
@@ -174,9 +174,9 @@ export function writeCRespWeaponSkin(writer: BinaryWriter, resp: CRespWeaponSkin
 // =============================================================================
 
 export interface CReqWing {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nWingId: number;            // UInt32
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nWingId: number; // UInt32
 }
 
 export function readCReqWing(reader: BinaryReader): CReqWing {
@@ -189,7 +189,7 @@ export function readCReqWing(reader: BinaryReader): CReqWing {
 
 export interface CRespWing {
   m_stRetMsg: CCommonRespMsg;
-  m_nWingId: number;            // UInt32
+  m_nWingId: number; // UInt32
 }
 
 export function writeCRespWing(writer: BinaryWriter, resp: CRespWing): void {
@@ -202,10 +202,10 @@ export function writeCRespWing(writer: BinaryWriter, resp: CRespWing): void {
 // =============================================================================
 
 export interface CReqOpenDragonBox {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nDiamond: number;           // UInt16
-  m_nBatchCount: number;        // UInt16
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nDiamond: number; // UInt16
+  m_nBatchCount: number; // UInt16
 }
 
 export function readCReqOpenDragonBox(reader: BinaryReader): CReqOpenDragonBox {
@@ -219,8 +219,8 @@ export function readCReqOpenDragonBox(reader: BinaryReader): CReqOpenDragonBox {
 
 export interface CRespOpenDragonBox {
   m_stRetMsg: CCommonRespMsg;
-  m_nBoxCount: number;          // UInt16
-  m_vecRewards: number[];       // UInt32[]
+  m_nBoxCount: number; // UInt16
+  m_vecRewards: number[]; // UInt32[]
 }
 
 export function writeCRespOpenDragonBox(writer: BinaryWriter, resp: CRespOpenDragonBox): void {
@@ -230,9 +230,9 @@ export function writeCRespOpenDragonBox(writer: BinaryWriter, resp: CRespOpenDra
 }
 
 export interface CReqOpenPetBox {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nCount: number;             // UInt16
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nCount: number; // UInt16
 }
 
 export function readCReqOpenPetBox(reader: BinaryReader): CReqOpenPetBox {
@@ -245,7 +245,7 @@ export function readCReqOpenPetBox(reader: BinaryReader): CReqOpenPetBox {
 
 export interface CRespOpenPetBox {
   m_stRetMsg: CCommonRespMsg;
-  m_vecRewards: number[];       // UInt32[]
+  m_vecRewards: number[]; // UInt32[]
 }
 
 export function writeCRespOpenPetBox(writer: BinaryWriter, resp: CRespOpenPetBox): void {
@@ -254,9 +254,9 @@ export function writeCRespOpenPetBox(writer: BinaryWriter, resp: CRespOpenPetBox
 }
 
 export interface CReqOpenEquipSBox {
-  m_nType: number;              // UInt16
-  m_nTransID: number;           // UInt32
-  m_nCount: number;             // UInt16
+  m_nType: number; // UInt16
+  m_nTransID: number; // UInt32
+  m_nCount: number; // UInt16
 }
 
 export function readCReqOpenEquipSBox(reader: BinaryReader): CReqOpenEquipSBox {
@@ -269,7 +269,7 @@ export function readCReqOpenEquipSBox(reader: BinaryReader): CReqOpenEquipSBox {
 
 export interface CRespOpenEquipSBox {
   m_stRetMsg: CCommonRespMsg;
-  m_vecRewards: number[];       // UInt32[]
+  m_vecRewards: number[]; // UInt32[]
 }
 
 export function writeCRespOpenEquipSBox(writer: BinaryWriter, resp: CRespOpenEquipSBox): void {
