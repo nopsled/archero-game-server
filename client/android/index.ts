@@ -1,15 +1,112 @@
 import "frida-il2cpp-bridge";
 import { FridaMultipleUnpinning } from "./multiple_unpinning";
+import { NativeTlsBypass } from "./native_tls_bypass";
+import { NativeTlsLogger } from "./native_tls_logger";
 import { Patcher } from "./socket_patcher";
 
 console.log("[Agent]: Script loaded");
 
-const ENABLE_IL2CPP_HOOKS = false;
+const ENABLE_IL2CPP_HOOKS = false; // Disable for traffic capture - too noisy
+const CAPTURE_ENABLED = true; // Enable data capture for game traffic
+const ENABLE_NATIVE_TLS_BYPASS = true;
+const ENABLE_NATIVE_TLS_LOGGER = true;
+// Emulator-local port that we adb-reverse to the host's 8443.
+// Use a high port to avoid hijacking emulator/vendor localhost services.
+const LOCAL_TLS_PORT = 18443;
+const REDIRECT_GAME_TLS = false;
+const TLS_LOG_MAX_BYTES = 4096; // Larger buffer for protocol analysis
+
+// CAPTURE MODE: false = discovery (log connections only), true = traffic capture (log data)
+const TRAFFIC_CAPTURE_MODE = true;
+const DISCOVERY_MODE = !TRAFFIC_CAPTURE_MODE; // They are mutually exclusive
+
+// Game server IPs to capture traffic from (port 12020)
+const GAME_SERVER_IPS = [
+  "52.196.213.239",  // Tokyo
+  "52.58.11.88",     // Frankfurt
+  "52.76.226.28",    // Singapore
+];
+
+const WATCH_HOSTNAMES = [
+  "hotupdate-archero.habby.com",
+  "game-archero-v1.archerosvc.com",
+  "config-archero.archerosvc.com",
+  "config.uca.cloud.unity3d.com",
+  "cdp.cloud.unity3d.com",
+  "mail-archero.habby.mobi",
+] as const;
 
 // Start bypass SSL pinning
 FridaMultipleUnpinning.bypass(true);
-// Recommended with emulators: `adb reverse tcp:443 tcp:443` then patch to localhost.
-Patcher.PatchConnect("127.0.0.1", [443], true);
+if (ENABLE_NATIVE_TLS_BYPASS) {
+  try {
+    NativeTlsBypass.enable(true);
+    console.log("[Agent]: Native TLS bypass enabled");
+  } catch (e) {
+    console.log(`[Agent]: Native TLS bypass failed: ${String(e)}`);
+  }
+}
+
+if (ENABLE_NATIVE_TLS_LOGGER) {
+  try {
+    console.log("[Agent]: Enabling Native TLS logger...");
+    const ok = NativeTlsLogger.enable([...WATCH_HOSTNAMES], TLS_LOG_MAX_BYTES);
+    console.log(`[Agent]: Native TLS logger ${ok ? "enabled" : "not available"}`);
+  } catch (e) {
+    const stack = (e as any)?.stack ? `\n${(e as any).stack}` : "";
+    console.log(`[Agent]: Native TLS logger failed: ${String(e)}${stack}`);
+  }
+}
+
+// Optional: redirect selected game hostnames (port 443) to a local sandbox TLS port.
+// Keep this OFF while you're just observing startup traffic against real servers.
+if (REDIRECT_GAME_TLS) {
+  Patcher.ConfigureTlsRemap({
+    enabled: true,
+    matchIp: "127.0.0.2",
+    targetIp: "127.0.0.1",
+    fromPort: 443,
+    toPort: LOCAL_TLS_PORT,
+    maxAgeMs: 2000,
+  });
+}
+
+Patcher.PatchGetaddrinfoAllowlist(
+  REDIRECT_GAME_TLS
+    ? [
+      "hotupdate-archero.habby.com",
+      "game-archero-v1.archerosvc.com",
+      "config-archero.archerosvc.com",
+      "*.archerosvc.com",
+      "mail-archero.habby.mobi",
+    ]
+    : [],
+  "127.0.0.2",
+  DISCOVERY_MODE, // Only log DNS in discovery mode
+  [...WATCH_HOSTNAMES]
+);
+
+// Install connect hook - enable debugging to see connections
+Patcher.PatchConnect("127.0.0.1", [], true); // Always show connect logs to debug
+
+// Configure traffic capture for game protocol analysis
+// TEMPORARILY DISABLED PORT FILTER to capture ALL traffic and diagnose the issue
+Patcher.EnableCapture({
+  enabled: CAPTURE_ENABLED,
+  onlyTracked: false, // Capture from all sockets
+  onlyPatched: false,
+  ports: null, // TEMPORARILY: capture ALL ports to see what's happening
+  maxBytes: 4096, // Capture more data for protocol analysis
+  emitMessages: false,
+  emitConsole: true,
+  captureReadWrite: true, // Enable full I/O capture
+  captureSyscalls: false,
+});
+
+if (TRAFFIC_CAPTURE_MODE) {
+  console.log("[Agent]: TRAFFIC CAPTURE MODE - capturing port 12020 data");
+  console.log(`[Agent]: Watching game servers: ${GAME_SERVER_IPS.join(", ")}`);
+}
 
 if (!ENABLE_IL2CPP_HOOKS) {
   console.log("[Agent]: Il2Cpp hooks disabled (ENABLE_IL2CPP_HOOKS=false)");
@@ -40,6 +137,7 @@ if (!ENABLE_IL2CPP_HOOKS) {
   const UserData = AssemblyCSharp.class("Habby.Model.UserData");
   const HabbyClient = AssemblyCSharp.class("HabbyClient");
   const UserResponse = AssemblyCSharp.class("Habby.Net.Responses.SyncUserResponse");
+    const CUserLoginPacket = AssemblyCSharp.class("GameProtocol.CUserLoginPacket");
 
   // const UpdateManager = AssemblyLib.class("Habby.UpdateTool.UpdateManager");
   // const CertificateHandler = AssemblyUnityWebRequestModule.class("UnityEngine.Networking.CertificateHandler");
@@ -73,7 +171,97 @@ if (!ENABLE_IL2CPP_HOOKS) {
   // const MailRequestPath = AssemblyHabbyMail.class("Habby.Mail.MailRequestPath");
   // const MailSetting = AssemblyHabbyMail.class("Habby.Mail.MailSetting");
   // const StoreChannel = AssemblyHabbyMail.class("Habby.Mail.StoreChannel");
-  // const CustomBinaryWriter = AssemblyCSharp.class("CustomBinaryWriter");
+    const CustomBinaryWriter = AssemblyCSharp.class("CustomBinaryWriter");
+
+    // Helper function to convert byte array to hex string
+    function bytesToHex(bytes: any): string {
+      if (!bytes) return "<null>";
+      try {
+        const len = bytes.Length || bytes.length || 0;
+        if (len === 0) return "<empty>";
+        const hexParts: string[] = [];
+        for (let i = 0; i < Math.min(len, 512); i++) {
+          const b = bytes.get_Item ? bytes.get_Item(i) : bytes[i];
+          hexParts.push(("0" + (b & 0xff).toString(16)).slice(-2));
+        }
+        return hexParts.join(" ") + (len > 512 ? ` ...(+${len - 512}b)` : "");
+      } catch (e) {
+        return `<error: ${e}>`;
+      }
+    }
+
+    // Hook CustomBinaryWriter to capture binary data being written
+    const binaryWriterMethods = ["Write", "WriteBytes", "WriteByte", "WriteInt16", "WriteInt32", "WriteInt64", "WriteString", "WriteUInt16", "WriteUInt32", "WriteUInt64", "Flush", "Close", "ToArray", "GetBuffer"];
+    CustomBinaryWriter.methods.forEach((method) => {
+      if (!binaryWriterMethods.some(m => method.name.includes(m))) return;
+      CustomBinaryWriter.method(method.name).implementation = function (this: any, ...args: any[]) {
+        const result = this.method(method.name).invoke(...args);
+        if (method.name === "ToArray" || method.name === "GetBuffer") {
+          console.log(`[CustomBinaryWriter::${method.name}] => ${bytesToHex(result)}`);
+        } else if (args.length > 0) {
+          const argStr = args.map((a: any) => {
+            if (a && a.length !== undefined && typeof a.length === "number" && a.length > 0) {
+              return bytesToHex(a);
+            }
+            return String(a);
+          }).join(", ");
+          console.log(`[CustomBinaryWriter::${method.name}]: ${argStr}`);
+        } else {
+          console.log(`[CustomBinaryWriter::${method.name}]`);
+        }
+        return result;
+      };
+    });
+
+    // Try to hook TcpNetManager for send/receive
+    try {
+      const TcpNetManager = AssemblyCSharp.class("TcpNetManager");
+      TcpNetManager.methods.forEach((method) => {
+        if (method.name.toLowerCase().includes("send") || method.name.toLowerCase().includes("recv") || method.name.toLowerCase().includes("receive")) {
+          TcpNetManager.method(method.name).implementation = function (this: any, ...args: any[]) {
+            const argStr = args.map((a: any) => {
+              if (a && typeof a === "object" && (a.Length || a.length)) {
+                return `[bytes: ${bytesToHex(a)}]`;
+              }
+              return String(a);
+            }).join(", ");
+            console.log(`[TcpNetManager::${method.name}]: ${argStr}`);
+            const result = this.method(method.name).invoke(...args);
+            if (result && typeof result === "object" && (result.Length || result.length)) {
+              console.log(`[TcpNetManager::${method.name}] => ${bytesToHex(result)}`);
+            }
+            return result;
+          };
+        }
+      });
+      console.log("[Agent]: TcpNetManager hooks installed");
+    } catch (e) {
+      console.log(`[Agent]: TcpNetManager not found or hook failed: ${e}`);
+    }
+
+    // Try to hook NetEncrypt to see encrypted/decrypted bytes
+    try {
+      const NetEncrypt = AssemblyCSharp.class("NetEncrypt");
+      NetEncrypt.methods.forEach((method) => {
+        NetEncrypt.method(method.name).implementation = function (this: any, ...args: any[]) {
+          const argStr = args.map((a: any) => {
+            if (a && typeof a === "object" && (a.Length || a.length)) {
+              return `[bytes: ${bytesToHex(a)}]`;
+            }
+            return String(a);
+          }).join(", ");
+          console.log(`[NetEncrypt::${method.name}]: ${argStr}`);
+          const result = this.method(method.name).invoke(...args);
+          if (result && typeof result === "object" && (result.Length || result.length)) {
+            console.log(`[NetEncrypt::${method.name}] => ${bytesToHex(result)}`);
+          }
+          return result;
+        };
+      });
+      console.log("[Agent]: NetEncrypt hooks installed");
+    } catch (e) {
+      console.log(`[Agent]: NetEncrypt not found: ${e}`);
+    }
 
   S3SendMgr.methods.forEach((method) => {
     S3SendMgr.method(method.name).implementation = function (this: any, ...args: any[]) {
@@ -97,12 +285,12 @@ if (!ENABLE_IL2CPP_HOOKS) {
   //         return this.method(method.name).invoke(...args);
   //     }
   // }));
-  // UserResponse.methods.forEach((method => {
-  //     UserResponse.method(method.name).implementation = function (this: any, ...args: any[]) {
-  //         console.log("[UserResponse::" + method.name + "]: " + args.toString());
-  //         return this.method(method.name).invoke(...args);
-  //     }
-  // }));
+    UserResponse.methods.forEach((method) => {
+      UserResponse.method(method.name).implementation = function (this: any, ...args: any[]) {
+        console.log("[UserResponse::" + method.name + "]: " + args.toString());
+        return this.method(method.name).invoke(...args);
+      };
+    });
   RequestFactory.methods.forEach((method) => {
     RequestFactory.method(method.name).implementation = function (this: any, ...args: any[]) {
       console.log("[RequestFactory::" + method.name + "]: " + args.toString());
@@ -359,12 +547,12 @@ if (!ENABLE_IL2CPP_HOOKS) {
   //         return this.method(method.name).invoke(...args);
   //     }
   // }));
-  // CUserLoginPacket.methods.forEach((method => {
-  //     CUserLoginPacket.method(method.name).implementation = function (this: any, ...args: any[]) {
-  //         log("[CUserLoginPacket::" + method.name + "]: " + args.toString());
-  //         return this.method(method.name).invoke(...args);
-  //     }
-  // }));
+    CUserLoginPacket.methods.forEach((method) => {
+      CUserLoginPacket.method(method.name).implementation = function (this: any, ...args: any[]) {
+        console.log("[CUserLoginPacket::" + method.name + "]: " + args.toString());
+        return this.method(method.name).invoke(...args);
+      };
+    });
 
   // ENCRYPTION ------------------------------------------------------------------
   // const RC4EncrypterIngoreMethods = [

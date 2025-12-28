@@ -7,3 +7,5 @@ declare const Module: {
   findBaseAddress(name: string): NativePointer | null;
   getBaseAddress(name: string): NativePointer;
 };
+
+declare function send(message: any, data?: ArrayBuffer): void;

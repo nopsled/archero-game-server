@@ -18,9 +18,88 @@ from pathlib import Path
 
 from .config import header
 
-CERT_DIR = Path(os.environ.get("ARCHERO_CERT_DIR", ".local/certs"))
+
+def resolve_cert_dir() -> Path:
+    override = os.environ.get("ARCHERO_CERT_DIR")
+    if override:
+        return Path(override)
+
+    preferred = Path(".local/certs")
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        probe = preferred / ".write_test"
+        probe.write_bytes(b"ok")
+        probe.unlink()
+        return preferred
+    except Exception:
+        return Path("/tmp/archero-certs")
+
+
+CERT_DIR = resolve_cert_dir()
 CERT_PATH = CERT_DIR / "cert.pem"
 KEY_PATH = CERT_DIR / "key.pem"
+CA_CERT_PATH = CERT_DIR / "ca.pem"
+CA_KEY_PATH = CERT_DIR / "ca.key"
+
+
+def _try_parse_tls_sni(client_hello: bytes) -> str | None:
+    # Minimal TLS ClientHello SNI extractor (best-effort).
+    # Supports the common case where peek includes at least the first record.
+    try:
+        if len(client_hello) < 5:
+            return None
+        if client_hello[0] != 0x16:  # handshake
+            return None
+        rec_len = int.from_bytes(client_hello[3:5], "big")
+        if len(client_hello) < 5 + rec_len:
+            return None
+        hs = client_hello[5 : 5 + rec_len]
+        if len(hs) < 4 or hs[0] != 0x01:  # ClientHello
+            return None
+        hs_len = int.from_bytes(hs[1:4], "big")
+        body = hs[4 : 4 + hs_len]
+        if len(body) < 42:
+            return None
+        p = 2  # client_version
+        p += 32  # random
+        sid_len = body[p]
+        p += 1 + sid_len
+        cs_len = int.from_bytes(body[p : p + 2], "big")
+        p += 2 + cs_len
+        comp_len = body[p]
+        p += 1 + comp_len
+        if p + 2 > len(body):
+            return None
+        ext_len = int.from_bytes(body[p : p + 2], "big")
+        p += 2
+        end = min(len(body), p + ext_len)
+        while p + 4 <= end:
+            etype = int.from_bytes(body[p : p + 2], "big")
+            elen = int.from_bytes(body[p + 2 : p + 4], "big")
+            p += 4
+            if p + elen > end:
+                return None
+            if etype == 0x0000:  # server_name
+                ext = body[p : p + elen]
+                if len(ext) < 2:
+                    return None
+                list_len = int.from_bytes(ext[0:2], "big")
+                q = 2
+                list_end = min(len(ext), 2 + list_len)
+                while q + 3 <= list_end:
+                    name_type = ext[q]
+                    name_len = int.from_bytes(ext[q + 1 : q + 3], "big")
+                    q += 3
+                    if q + name_len > list_end:
+                        return None
+                    if name_type == 0:  # host_name
+                        return ext[q : q + name_len].decode("utf-8", errors="replace")
+                    q += name_len
+                return None
+            p += elen
+    except Exception:
+        return None
+    return None
 
 
 class GameWorldManager:
@@ -69,37 +148,125 @@ class PlayerObject:
         pass
 
 
+def _load_or_generate_key(path: Path, *, bits: int = 2048) -> crypto.PKey:
+    if path.exists():
+        return crypto.load_privatekey(crypto.FILETYPE_PEM, path.read_bytes())
+    key = crypto.PKey()
+    key.generate_key(crypto.TYPE_RSA, bits)
+    path.write_bytes(crypto.dump_privatekey(crypto.FILETYPE_PEM, key))
+    return key
+
+
+def _load_or_generate_ca() -> tuple[crypto.X509, crypto.PKey]:
+    CERT_DIR.mkdir(parents=True, exist_ok=True)
+
+    ca_key = _load_or_generate_key(CA_KEY_PATH)
+    if CA_CERT_PATH.exists():
+        ca_cert = crypto.load_certificate(
+            crypto.FILETYPE_PEM, CA_CERT_PATH.read_bytes()
+        )
+        return ca_cert, ca_key
+
+    ca_cert = crypto.X509()
+    ca_cert.set_version(2)
+    ca_cert.set_serial_number(1)
+    ca_subject = ca_cert.get_subject()
+    ca_subject.CN = "Archero Local CA"
+    ca_cert.gmtime_adj_notBefore(0)
+    ca_cert.gmtime_adj_notAfter(10 * 365 * 24 * 60 * 60)
+    ca_cert.set_issuer(ca_subject)
+    ca_cert.set_pubkey(ca_key)
+    ca_cert.add_extensions(
+        [
+            crypto.X509Extension(b"basicConstraints", True, b"CA:TRUE, pathlen:0"),
+            crypto.X509Extension(b"keyUsage", True, b"keyCertSign, cRLSign"),
+            crypto.X509Extension(
+                b"subjectKeyIdentifier", False, b"hash", subject=ca_cert
+            ),
+        ]
+    )
+    ca_cert.sign(ca_key, "sha256")
+    CA_CERT_PATH.write_bytes(crypto.dump_certificate(crypto.FILETYPE_PEM, ca_cert))
+    return ca_cert, ca_key
+
+
 def generate_cert():
     CERT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Create a self-signed certificate
+    # Keep certs stable across restarts if present.
+    if (
+        os.environ.get("ARCHERO_REGEN_CERT") != "1"
+        and CERT_PATH.exists()
+        and KEY_PATH.exists()
+        and CA_CERT_PATH.exists()
+    ):
+        return
+
+    ca_cert, ca_key = _load_or_generate_ca()
+    leaf_key = _load_or_generate_key(KEY_PATH)
+
     cert = crypto.X509()
-    cert.get_subject().CN = "habby.mobi"
+    cert.set_version(2)
     cert.set_serial_number(1000)
+    subject = cert.get_subject()
+    subject.CN = "habby.mobi"
     cert.gmtime_adj_notBefore(0)
     cert.gmtime_adj_notAfter(10 * 365 * 24 * 60 * 60)
-    cert.set_issuer(cert.get_subject())
-    cert.set_pubkey(pkey)
-    cert.sign(pkey, "sha256")
+    cert.set_issuer(ca_cert.get_subject())
+    cert.set_pubkey(leaf_key)
+
+    sans = [
+        "DNS:habby.mobi",
+        "DNS:*.habby.mobi",
+        "DNS:receiver.habby.mobi",
+        "DNS:hotupdate-archero.habby.com",
+        "DNS:*.archerosvc.com",
+        "DNS:game-archero-v1.archerosvc.com",
+        "DNS:config-archero.archerosvc.com",
+    ]
+    cert.add_extensions(
+        [
+            crypto.X509Extension(b"basicConstraints", False, b"CA:FALSE"),
+            crypto.X509Extension(
+                b"keyUsage", False, b"digitalSignature, keyEncipherment"
+            ),
+            crypto.X509Extension(b"extendedKeyUsage", False, b"serverAuth"),
+            crypto.X509Extension(
+                b"subjectAltName", False, (", ".join(sans)).encode("ascii")
+            ),
+            crypto.X509Extension(b"subjectKeyIdentifier", False, b"hash", subject=cert),
+            crypto.X509Extension(
+                b"authorityKeyIdentifier", False, b"keyid", issuer=ca_cert
+            ),
+        ]
+    )
+    cert.sign(ca_key, "sha256")
 
     # Write the certificate to a file
     CERT_PATH.write_bytes(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
 
-    # Write the private key to a file
-    KEY_PATH.write_bytes(crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey))
-
 
 def parse_socket_data(socket_data):
-    data = socket_data.decode("utf-8")
-    # separate headers from data
-    headers, data = re.split("\r\n\r\n", data, 1)
-    # parse headers into dictionary
-    header_lines = headers.split("\r\n")
+    delimiter = b"\r\n\r\n"
+    idx = socket_data.find(delimiter)
+    if idx == -1:
+        return {}, socket_data
+
+    head_bytes = socket_data[:idx]
+    body = socket_data[idx + len(delimiter) :]
+    head = head_bytes.decode("utf-8", errors="replace")
+
+    header_lines = head.split("\r\n")
     header_dict = {}
-    for line in header_lines:
-        key, value = line.split(": ", 1)
-        header_dict[key] = value
-    return header_dict, data.encode("utf-8")
+    if header_lines:
+        header_dict[":request-line"] = header_lines[0]
+        for line in header_lines[1:]:
+            if ": " not in line:
+                continue
+            key, value = line.split(": ", 1)
+            header_dict[key] = value
+
+    return header_dict, body
 
 
 class NetUtility:
@@ -120,33 +287,216 @@ class API:
         pass
 
 
-class Client:
-    def __init__(self, socket):
+class GameProtocolClient:
+    """Handler for binary game protocol on port 12020."""
+
+    def __init__(self, socket, client_address):
         self.socket = socket
+        self.client_address = client_address
+        self.buffer = bytearray()
+
+    def recv_loop(self):
+        """Main receive loop for game protocol."""
+        from .protocol import Packet
+        from .handlers.login import handle_packet
+
+        print(f"[GameProtocol] Client connected from {self.client_address}")
+
+        try:
+            self.socket.settimeout(30.0)  # 30 second timeout for game protocol
+        except Exception:
+            pass
+
+        while True:
+            if self.socket.fileno() == -1:
+                print(f"[GameProtocol] Socket closed for {self.client_address}")
+                break
+
+            try:
+                chunk = self.socket.recv(4096)
+            except socket.timeout:
+                # Send heartbeat to keep connection alive
+                continue
+            except Exception as e:
+                print(f"[GameProtocol] Recv error from {self.client_address}: {e}")
+                break
+
+            if not chunk:
+                print(f"[GameProtocol] Client {self.client_address} disconnected")
+                break
+
+            self.buffer.extend(chunk)
+            print(
+                f"[GameProtocol] Received {len(chunk)} bytes, buffer size: {len(self.buffer)}"
+            )
+            print(
+                f"[GameProtocol] Buffer hex: {bytes(self.buffer[:64]).hex()}"
+                + ("..." if len(self.buffer) > 64 else "")
+            )
+
+            # Try to parse complete packets from buffer
+            self._process_buffer(Packet, handle_packet)
+
+        try:
+            self.socket.close()
+        except Exception:
+            pass
+
+    def _process_buffer(self, Packet, handle_packet):
+        """Process any complete packets in the buffer."""
+        while len(self.buffer) >= 4:
+            # Check if we have the complete packet
+            packet_len = int.from_bytes(self.buffer[:4], "little")
+            if len(self.buffer) < 4 + packet_len:
+                # Wait for more data
+                print(
+                    f"[GameProtocol] Waiting for more data: have {len(self.buffer)}, need {4 + packet_len}"
+                )
+                break
+
+            try:
+                packet, remaining = Packet.from_bytes(bytes(self.buffer))
+                self.buffer = bytearray(remaining)
+
+                print(
+                    f"[GameProtocol] Parsed packet: type=0x{packet.msg_type:04x}, payload_len={len(packet.payload)}"
+                )
+
+                # Handle the packet
+                response = handle_packet(packet)
+                if response is not None:
+                    self._send_packet(response)
+
+            except Exception as e:
+                print(f"[GameProtocol] Error parsing packet: {e}")
+                print(
+                    f"[GameProtocol] Buffer hex at error: {bytes(self.buffer[:128]).hex()}"
+                )
+                # Clear buffer on parse error to recover
+                self.buffer.clear()
+                break
+
+    def _send_packet(self, packet):
+        """Send a packet to the client."""
+        try:
+            data = packet.to_bytes()
+            print(
+                f"[GameProtocol] Sending packet: type=0x{packet.msg_type:04x}, total_len={len(data)}"
+            )
+            print(
+                f"[GameProtocol] Send hex: {data[:64].hex()}"
+                + ("..." if len(data) > 64 else "")
+            )
+            self.socket.sendall(data)
+        except Exception as e:
+            print(f"[GameProtocol] Send error: {e}")
+
+
+class Client:
+    def __init__(self, socket, alpn: str | None = None, listen_port: int | None = None):
+        self.socket = socket
+        self.alpn = alpn
+        self.listen_port = listen_port
         self.port = -0
 
-    def recv(self):
-        while True:
-            time.sleep(0.25)
+    def _send_h2_settings(self):
+        # HTTP/2 SETTINGS frame with empty payload:
+        # length(3)=0x000000, type(1)=0x04, flags(1)=0x00, stream_id(4)=0x00000000
+        self.socket.sendall(b"\x00\x00\x00\x04\x00\x00\x00\x00\x00")
 
+    def _send_h2_settings_ack(self):
+        # SETTINGS ACK: flags=0x01
+        self.socket.sendall(b"\x00\x00\x00\x04\x01\x00\x00\x00\x00")
+
+    def _send_h2_ping_ack(self, opaque8: bytes):
+        # PING ACK: length=8 type=0x06 flags=0x01 stream=0
+        self.socket.sendall(b"\x00\x00\x08\x06\x01\x00\x00\x00\x00" + opaque8)
+
+    def recv(self):
+        h2_buffer = bytearray()
+        if self.alpn == "h2":
+            try:
+                self._send_h2_settings()
+                print("[+] Sent HTTP/2 SETTINGS (empty)")
+            except Exception as e:
+                print(f"[-] Failed to send HTTP/2 SETTINGS: {e}")
+
+        try:
+            # Reduce the chance of missing short-lived connections.
+            self.socket.settimeout(1.0)
+        except Exception:
+            pass
+
+        while True:
             if self.socket.fileno() == -1:
                 print("[-] Socket is closed")
                 break
 
             try:
                 received_data = self.socket.recv(2048)
+            except socket.timeout:
+                continue
             except Exception as e:
                 print(f"[-] Cannot recv data on socket, error: {e}")
+                break
+
+            if received_data == b"":
+                print("[-] Peer closed connection")
+                break
 
             if len(received_data) > 0:
-                # assume received_data is the received data from the socket
-                data = parse_socket_data(received_data)
+                if self.alpn == "h2":
+                    h2_buffer.extend(received_data)
+                    # Parse as many HTTP/2 frames as we can.
+                    while len(h2_buffer) >= 9:
+                        length = (
+                            (h2_buffer[0] << 16) | (h2_buffer[1] << 8) | h2_buffer[2]
+                        )
+                        ftype = h2_buffer[3]
+                        flags = h2_buffer[4]
+                        stream_id = (
+                            ((h2_buffer[5] & 0x7F) << 24)
+                            | (h2_buffer[6] << 16)
+                            | (h2_buffer[7] << 8)
+                            | h2_buffer[8]
+                        )
+                        if len(h2_buffer) < 9 + length:
+                            break
+                        payload = bytes(h2_buffer[9 : 9 + length])
+                        del h2_buffer[: 9 + length]
 
-                # print headers and data
-                print("Headers:")
-                for key, value in headers.items():
-                    print(f"{key}: {value}")
-                print(f"Data: {data}")
+                        print(
+                            f"[H2] frame type={ftype} flags=0x{flags:02x} stream={stream_id} len={length} payload_hex={payload[:64].hex()}"
+                            + (
+                                ""
+                                if len(payload) <= 64
+                                else f"…(+{len(payload) - 64}b)"
+                            )
+                        )
+
+                        # Respond to SETTINGS / PING so the client keeps talking.
+                        try:
+                            if ftype == 4 and (flags & 0x1) == 0:
+                                self._send_h2_settings_ack()
+                                print("[H2] sent SETTINGS ACK")
+                            elif ftype == 6 and length == 8 and (flags & 0x1) == 0:
+                                self._send_h2_ping_ack(payload)
+                                print("[H2] sent PING ACK")
+                        except Exception as e:
+                            print(f"[-] Failed to respond to H2 control frame: {e}")
+                    continue
+
+                headers, body = parse_socket_data(received_data)
+                if headers:
+                    print("Headers:")
+                    for key, value in headers.items():
+                        print(f"{key}: {value}")
+                if body:
+                    snippet = body[:256]
+                    print(
+                        f"Body: {snippet!r}"
+                        + ("" if len(body) <= 256 else f" …(+{len(body) - 256}b)")
+                    )
 
                 decodedData = received_data.decode()
                 strippedData = decodedData.strip()
@@ -158,7 +508,7 @@ class Client:
                         print(
                             f"[+] Client requested: {endpoint}, response sent back to client."
                         )
-                        response = header.RESPONSE_HEADER + endpoints[endpoint]
+                        response = header.RESPONSE_HEADER + b"{}"
                         self.socket.send(response)
                         print(response)
                         break
@@ -303,45 +653,133 @@ class Client:
                     print("[+] Response: " + response.decode())
 
 
-def onNewClient(clientSocket, clientAddress, isSSL):
-    client = Client(clientSocket)
+def onNewClient(
+    clientSocket,
+    clientAddress,
+    isSSL,
+    alpn: str | None = None,
+    listen_port: int | None = None,
+):
+    # Use game protocol handler for port 12020 (game server)
+    if listen_port == 12020:
+        client = GameProtocolClient(clientSocket, clientAddress)
+        Thread(target=client.recv_loop).start()
+        print(f"[+]: New GAME client connected on {listen_port}: {clientAddress}")
+        return
+
+    # Use HTTP handler for other ports
+    client = Client(clientSocket, alpn=alpn, listen_port=listen_port)
     # GameWorldManager.instances.append(client)
     Thread(target=client.recv).start()
     # Thread(target=client.gameLoop).start()
-    print(f"[+]: New game client connected: {clientAddress}")
+    if listen_port is None:
+        print(f"[+]: New HTTP client connected: {clientAddress}")
+    else:
+        print(f"[+]: New HTTP client connected on {listen_port}: {clientAddress}")
 
 
-def loop(socket, port, isSSL):
+def loop(server_socket, port, isSSL):
     print(f"[+] Server started 0.0.0.0:{port}. Waiting for connections...")
-    while True:
-        (client_socket, client_address) = socket.accept()
-        if isSSL == True:
-            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            context.load_cert_chain(certfile=str(CERT_PATH), keyfile=str(KEY_PATH))
-            try:
-                client_socket = context.wrap_socket(client_socket, server_side=True)
-                print(f"[+] SSL handshake successful: {client_address}")
-            except ssl.SSLError as e:
-                print(f"[-] SSL handshake failed: {e}")
-                client_socket.close()
-                continue
+    context: ssl.SSLContext | None = None
+    if isSSL or os.environ.get("ARCHERO_PLAIN_DETECT_TLS", "1") == "1":
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.verify_mode = ssl.CERT_NONE
+        context.set_alpn_protocols(["h2", "http/1.1"])
+        context.load_cert_chain(certfile=str(CERT_PATH), keyfile=str(KEY_PATH))
 
-        onNewClient(client_socket, client_address, isSSL)
+    def handle_client(client_socket, client_address):
+        nonlocal context
+        alpn = None
+        if isSSL and context is not None:
+            try:
+                if os.environ.get("ARCHERO_LOG_PEEK") == "1":
+                    try:
+                        client_socket.settimeout(1.0)
+                        peek = client_socket.recv(32, socket.MSG_PEEK)
+                        if peek:
+                            ascii_preview = peek.decode("ascii", errors="replace")
+                            print(
+                                f"[+] Pre-TLS peek from {client_address}: hex={peek.hex()} ascii={ascii_preview!r}"
+                            )
+                        else:
+                            print(f"[+] Pre-TLS peek from {client_address}: <empty>")
+                    except Exception as e:
+                        print(f"[-] Pre-TLS peek failed from {client_address}: {e}")
+
+                    try:
+                        client_socket.settimeout(1.0)
+                        peek_full = client_socket.recv(2048, socket.MSG_PEEK)
+                        sni = _try_parse_tls_sni(peek_full)
+                        if sni:
+                            print(f"[+] TLS SNI from {client_address}: {sni}")
+                    except Exception:
+                        pass
+
+                # Prevent clients from stalling the accept loop by never completing TLS.
+                client_socket.settimeout(2.0)
+                client_socket = context.wrap_socket(client_socket, server_side=True)
+                client_socket.settimeout(None)
+                alpn = client_socket.selected_alpn_protocol()
+                print(f"[+] SSL handshake successful: {client_address}")
+                if alpn:
+                    print(f"[+] ALPN selected: {alpn}")
+            except ssl.SSLError as e:
+                print(f"[-] SSL handshake failed from {client_address}: {e}")
+                client_socket.close()
+                return
+            except OSError as e:
+                print(f"[-] TLS socket error from {client_address}: {e}")
+                client_socket.close()
+                return
+        elif (
+            (not isSSL)
+            and context is not None
+            and os.environ.get("ARCHERO_PLAIN_DETECT_TLS", "1") == "1"
+        ):
+            # Opportunistically upgrade plain ports (e.g. 12020) if the client is speaking TLS.
+            try:
+                client_socket.settimeout(1.0)
+                peek = client_socket.recv(5, socket.MSG_PEEK)
+                if len(peek) >= 3 and peek[0] == 0x16 and peek[1] == 0x03:
+                    if os.environ.get("ARCHERO_LOG_PEEK") == "1":
+                        print(
+                            f"[+] Detected TLS on plain port {port} from {client_address}: hex={peek.hex()}"
+                        )
+                    client_socket.settimeout(2.0)
+                    client_socket = context.wrap_socket(client_socket, server_side=True)
+                    client_socket.settimeout(None)
+                    alpn = client_socket.selected_alpn_protocol()
+                    print(
+                        f"[+] TLS handshake successful (plain:{port}): {client_address}"
+                    )
+                    if alpn:
+                        print(f"[+] ALPN selected (plain:{port}): {alpn}")
+            except Exception:
+                # keep as plain
+                try:
+                    client_socket.settimeout(None)
+                except Exception:
+                    pass
+
+        onNewClient(client_socket, client_address, isSSL, alpn=alpn, listen_port=port)
+
+    while True:
+        (client_socket, client_address) = server_socket.accept()
+        Thread(target=handle_client, args=(client_socket, client_address)).start()
 
 
 def main():
-    # Kill process if running earlier
-    subprocess.run(["sudo", "pkill", "python"])
+    # Optional kill-switch (disabled by default).
+    # Enable with: ARCHERO_PKILL_PYTHON=1 sudo uv run server
+    if os.environ.get("ARCHERO_PKILL_PYTHON") == "1":
+        subprocess.run(["pkill", "python"], check=False)
 
     os.environ["PYTHONASYNCIODEBUG"] = "1"
 
-    # Generate a private key
-    global pkey
-    pkey = crypto.PKey()
-    pkey.generate_key(crypto.TYPE_RSA, 2048)
     generate_cert()
 
-    sslPort = 443
+    sslPort = int(os.environ.get("ARCHERO_SSL_PORT", "443"))
     sslSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sslSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sslSocket.bind(("0.0.0.0", sslPort))
@@ -354,6 +792,26 @@ def main():
             True,
         ),
     ).start()
+
+    plain_ports_raw = os.environ.get("ARCHERO_PLAIN_PORTS", "12020")
+    plain_ports: list[int] = []
+    for part in [p.strip() for p in plain_ports_raw.split(",") if p.strip()]:
+        try:
+            plain_ports.append(int(part))
+        except ValueError:
+            continue
+
+    for port in plain_ports:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("0.0.0.0", port))
+            s.listen(10)
+        except OSError as e:
+            print(f"[-] Failed to bind plain port {port}: {e}")
+            continue
+
+        Thread(target=loop, args=(s, port, False)).start()
 
 
 if __name__ == "__main__":

@@ -11,8 +11,15 @@ import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-import frida
-import psutil
+try:
+    import frida  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    frida = None
+
+try:
+    import psutil  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    psutil = None
 
 # Find frida executable - check common locations
 FRIDA_BIN = shutil.which("frida") or str(Path.home() / "Library/Python/3.9/bin/frida")
@@ -25,6 +32,7 @@ class Injector(ABC):
     bundle_name: str
     script_path: Path
     device_id: str | None = None
+    logfile: Path | None = None
 
     def __init__(self, script_path: Path | None = None):
         if script_path:
@@ -67,6 +75,8 @@ class Injector(ABC):
         else:
             cmd.append("-U")
         cmd.extend(["-l", str(self.script_path)])
+        if self.logfile:
+            cmd.extend(["-o", str(self.logfile)])
 
         if spawn:
             cmd.extend(["-f", self.bundle_name])
@@ -101,12 +111,17 @@ class Injector(ABC):
         else:
             cmd.append("-U")
         cmd.extend(["-W", self.bundle_name, "-l", str(self.script_path)])
+        if self.logfile:
+            cmd.extend(["-o", str(self.logfile)])
 
         print(f"[*] Running: {' '.join(cmd)}")
         subprocess.run(cmd, check=False)
 
     def wait_for_process(self, timeout: int = 30) -> bool:
         """Wait for the target process to appear on the device."""
+        if frida is None:
+            print("[-] Python module 'frida' is not installed; cannot use wait_for_process()")
+            return False
         print(f"[*] Waiting for {self.process_name}...")
         device = (
             frida.get_device(self.device_id, timeout=5)
@@ -170,6 +185,8 @@ class AndroidInjector(Injector):
             sys.exit(1)
 
         cmd = [FRIDA_BIN, "-D", self.device_id, "-W", self.bundle_name, "-l", str(self.script_path)]
+        if self.logfile:
+            cmd.extend(["-o", str(self.logfile)])
         print(f"[*] Running: {' '.join(cmd)}")
 
         process = subprocess.Popen(cmd)
@@ -203,6 +220,8 @@ class MacOSInjector(Injector):
 
     def is_running(self) -> bool:
         """Check if the process is running."""
+        if psutil is None:
+            raise RuntimeError("psutil is required for macOS injector")
         for proc in psutil.process_iter(["name"]):
             try:
                 if self.process_name.lower() in proc.info["name"].lower():
@@ -213,6 +232,8 @@ class MacOSInjector(Injector):
 
     def kill_process(self) -> bool:
         """Kill the process on macOS."""
+        if psutil is None:
+            raise RuntimeError("psutil is required for macOS injector")
         for proc in psutil.process_iter(["name"]):
             try:
                 if self.process_name.lower() in proc.info["name"].lower():
@@ -278,6 +299,11 @@ Examples:
         help="Frida device id (passed to `frida -D ...`); defaults to USB (`-U`)",
     )
     parser.add_argument(
+        "--logfile",
+        type=Path,
+        help="Write Frida output (including packet logs) to a file",
+    )
+    parser.add_argument(
         "--await-spawn",
         action="store_true",
         help="Wait for a spawn matching the app identifier and inject (uses `frida -W`)",
@@ -303,6 +329,7 @@ Examples:
 
     injector = injectors[args.platform](args.script)
     injector.device_id = args.device_id
+    injector.logfile = args.logfile
 
     if args.kill:
         injector.kill_process()

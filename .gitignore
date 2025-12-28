@@ -198,4 +198,5 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-agent.js
+client/android/agent.js
+client/android/discovery.js

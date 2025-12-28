@@ -1,7 +1,7 @@
 # Archero Private Server
 
 A **minimal reverse‑engineered API stub** for the mobile game **Archero**.  
-It listens on **`0.0.0.0:443`** (TLS) and fakes enough endpoints to let a local or emulated client boot, sync and ping without touching the real Habby back–end.
+It listens on **TLS** (default `0.0.0.0:443`, configurable) and fakes enough endpoints to let a local or emulated client boot, sync and ping without touching the real Habby back–end.
 
 > **Why?**  
 > ‑ Packet analysis, modding experiments, and educational study of encrypted mobile traffic.
@@ -12,10 +12,10 @@ It listens on **`0.0.0.0:443`** (TLS) and fakes enough endpoints to let a local 
 
 | Module / Concept | What It Does | File / Symbol |
 |------------------|-------------|---------------|
-| TLS bootstrap    | Generates an ad‑hoc self‑signed cert (`.local/certs/cert.pem`, `.local/certs/key.pem`) at launch and wraps accepted sockets. | `generate_cert()` + `ssl.wrap_socket` |
+| TLS bootstrap    | Generates an ad‑hoc self‑signed cert (defaults to `.local/certs/` if writable, else `/tmp/archero-certs/`) and wraps accepted sockets. | `generate_cert()` + `ssl.SSLContext.wrap_socket` |
 | Static responses | Hard‑coded HTTP/1.1 and HTTP/2 payloads for critical Archero endpoints: `…/announcements`, `…/installations`, `…/sync`, `…/config`, `app.adjust.com/session`, Crashlytics settings, etc. | `Client.recv()` branch‑by‑substring |
 | Multi‑client loop| Each incoming connection spawns a `threading.Thread` and drives a blocking `recv()` loop. | `onNewClient()` / `loop()` |
-| Hot kill‑switch  | Kills any lingering `python` PIDs at startup so port 443 is always free. | `subprocess.run(["sudo", "pkill", "python"])` |
+| Hot kill‑switch  | Optional: kills lingering `python` at startup (disabled by default). | `ARCHERO_PKILL_PYTHON=1` |
 | Expandable game logic | Stubs for a tiny "game world" (`GameWorldManager`, `GameObject`, `PlayerObject`) to inject live objects later. | top of file |
 
 
@@ -26,7 +26,7 @@ It listens on **`0.0.0.0:443`** (TLS) and fakes enough endpoints to let a local 
 ```bash
 # 1. Clone
 git clone https://github.com/your‑user/archero‑private‑server.git
-cd archero‑private‑server
+cd archero-game-server
 
 # 2. Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -34,8 +34,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # 3. Install dependencies (Python ≥ 3.13)
 uv sync
 
-# 4. Run (needs sudo to bind :443)
-sudo uv run server
+# 4. Run
+sudo uv run server  # binds :443
+
+# Or run without sudo on an unprivileged port:
+PYTHONUNBUFFERED=1 ARCHERO_SSL_PORT=8443 uv run server
 ```
 
 The console should show:
@@ -54,7 +57,7 @@ Connect an Android emulator or MITM proxy to **`https://127.0.0.1`** and watch t
 
 This repo includes a Frida agent in `client/` that:
 - Bypasses common TLS pinning (`client/android/multiple_unpinning.ts`)
-- Patches `connect()` so HTTPS `:443` goes to your local server (`client/android/socket_patcher.ts`)
+- Redirects only allowlisted game hostnames to your local server (TLS `:8443`) (`client/android/socket_patcher.ts`)
 
 ### Prereqs
 
@@ -68,13 +71,36 @@ This repo includes a Frida agent in `client/` that:
 sudo uv run server
 ```
 
-### 2) Reverse port 443 (recommended)
-
-Most emulators can’t reach your Mac directly, but `adb reverse` makes the emulator’s `127.0.0.1:443`
-forward to your Mac’s `127.0.0.1:443`.
+To avoid `sudo`, run the server on an unprivileged port (e.g. `8443`) and reverse the emulator’s `:18443` to it:
 
 ```bash
-adb -s 127.0.0.1:26657 reverse tcp:443 tcp:443
+PYTHONUNBUFFERED=1 ARCHERO_SSL_PORT=8443 uv run server
+adb -s 127.0.0.1:26657 reverse tcp:18443 tcp:8443
+```
+
+If you are also redirecting the game’s non-HTTPS port (commonly `12020`), reverse that too:
+
+```bash
+adb -s 127.0.0.1:26657 reverse tcp:12020 tcp:12020
+```
+
+If you previously used `adb reverse tcp:443 ...`, remove it to avoid capturing unrelated localhost:443 traffic:
+
+```bash
+adb -s 127.0.0.1:26657 reverse --remove tcp:443
+```
+
+If you still see `certificate unknown` TLS alerts from the emulator, you’ll need to trust the local CA:
+- The server writes a CA certificate to `ARCHERO_CERT_DIR/ca.pem` (defaults to `.local/certs/` if writable, else `/tmp/archero-certs/`).
+- Install that CA certificate in the emulator/device trust store (exact steps vary by emulator).
+
+### 2) Reverse port 18443 (recommended)
+
+Most emulators can’t reach your Mac directly, but `adb reverse` makes the emulator’s `127.0.0.1:18443`
+forward to your Mac’s `127.0.0.1:8443`.
+
+```bash
+adb -s 127.0.0.1:26657 reverse tcp:18443 tcp:8443
 adb -s 127.0.0.1:26657 reverse --list
 ```
 
@@ -98,14 +124,37 @@ catches it at launch:
 
 ```bash
 cd ..
-/Library/Developer/CommandLineTools/usr/bin/python3 client/injector.py android --await-spawn --restart --device 127.0.0.1:26657
+python3 client/injector.py android --await-spawn --restart --device 127.0.0.1:26657
 ```
 
 You should see in the Frida console:
 - `[Agent]: Script loaded`
 - `[SocketPatcher] exports ...`
-- `Installing connect hook -> 127.0.0.1 ports=[443]`
-- realtime `connect(...)` logs (and `send/recv` logs for patched sockets)
+- `Installing getaddrinfo allowlist hook ...`
+- `[NativeTlsLogger] Java TLS hooks installed: ...` (or native SSL exports if available)
+- realtime `track(fd=...) host=...` logs and `JAVA_SSL_write/JAVA_SSL_read` payload logs for watched hostnames
+
+### Packet capture
+
+There are two kinds of capture:
+
+- **TLS plaintext capture (recommended):** enabled via `NativeTlsLogger` in `client/android/index.ts`. This hooks the Java TLS stack (Conscrypt) when native `SSL_write/SSL_read` exports aren’t available and logs plaintext `JAVA_SSL_write/JAVA_SSL_read` for watched hostnames.
+- **Raw socket I/O capture:** `Patcher.EnableCapture(...)` in `client/android/index.ts`. This logs libc-level `send/recv/read/write` which is often ciphertext for HTTPS.
+
+To save the capture output to a file, pass `--logfile`:
+
+```bash
+python3 client/injector.py android --await-spawn --restart --device 127.0.0.1:26657 --logfile capture.log
+```
+
+### Record the first 60 seconds
+
+This repo includes a small helper that runs the server + injector for a fixed duration and saves logs under `logs/sessions/`:
+
+```bash
+python3 tools/record_first_minute.py --device 127.0.0.1:26657 --duration 60
+python3 tools/summarize_session.py logs/sessions/session-*/ --json
+```
 
 ### Changing the redirect IP
 
@@ -118,9 +167,13 @@ The redirect is configured in `client/android/index.ts`. Default is `127.0.0.1` 
 
 | Env / Const | Default                   | Purpose                                             |
 | ----------- | ------------------------- | --------------------------------------------------- |
-| `ports`     | `[443]`                   | TCP ports to open (additional ports commented out). |
-| `sslPort`   | `443`                     | Port wrapped in TLS.                                |
-| `ENDPOINTS` | `server.config.header.ENDPOINTS` | Dict of substring → body; edit to spoof new calls.  |
+| `ARCHERO_SSL_PORT` | `443`               | TLS port to bind (`8443` to avoid sudo).            |
+| `ARCHERO_CERT_DIR` | auto                | Override cert output dir (default auto-select).     |
+| `ARCHERO_PKILL_PYTHON` | unset/`0`        | Set to `1` to run `pkill python` on startup.        |
+| `ARCHERO_LOG_PEEK` | unset/`0`            | Set to `1` to log first bytes before TLS wrap.      |
+| `CAPTURE_ENABLED`  | `true` (agent)        | Enables socket capture logs in `capture.log`.       |
+| `ENABLE_NATIVE_TLS_BYPASS` | `true` (agent) | Best-effort native TLS verify bypass.               |
+| `ENABLE_NATIVE_TLS_LOGGER` | `true` (agent) | Logs TLS plaintext for watched hostnames (best-effort). |
 
 ---
 
