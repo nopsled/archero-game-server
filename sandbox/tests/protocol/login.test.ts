@@ -5,12 +5,12 @@
  */
 
 import { expect, test, describe } from "bun:test";
-import { BinaryReader, BinaryWriter } from "./binary";
+import { BinaryReader, BinaryWriter } from "../../protocol/binary";
 import {
   readCUserLoginPacket,
   writeCRespUserLoginPacket,
   createDefaultLoginResponse,
-} from "./login";
+} from "../../protocol/login";
 
 describe("CUserLoginPacket", () => {
   test("reads login request correctly", () => {

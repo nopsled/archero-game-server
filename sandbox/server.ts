@@ -152,9 +152,126 @@ function handlePacket(packet: Packet): Buffer | null {
     }
 
     default:
-      console.log(`[TCP] Unhandled message type: 0x${packet.msgType.toString(16).padStart(4, '0')}`);
-      console.log(`[TCP] Payload hex: ${packet.payload.toString('hex').substring(0, 100)}...`);
+      logUnknownPacket(packet);
       return null;
+  }
+}
+
+/**
+ * Verbose logging for unknown/unhandled packets
+ * Prints hex dump, attempts to parse common field types, and shows structure
+ */
+function logUnknownPacket(packet: Packet): void {
+  const { msgType, payload } = packet;
+
+  console.log(`\n${'='.repeat(80)}`);
+  console.log(`[UNKNOWN PACKET] Message Type: 0x${msgType.toString(16).padStart(4, '0')} (${msgType})`);
+  console.log(`${'='.repeat(80)}`);
+  console.log(`Payload Size: ${payload.length} bytes`);
+  console.log(`Timestamp: ${new Date().toISOString()}`);
+  console.log();
+
+  // Full hex dump with ASCII
+  console.log(`[HEX DUMP]`);
+  console.log(`${'─'.repeat(80)}`);
+  printHexDump(payload);
+  console.log();
+
+  // Try to parse common fields
+  console.log(`[FIELD ANALYSIS]`);
+  console.log(`${'─'.repeat(80)}`);
+
+  if (payload.length >= 4) {
+    try {
+      const reader = new BinaryReader(payload);
+
+      // Common packet patterns: transId first
+      const u32_0 = payload.readUInt32LE(0);
+      console.log(`  offset 0: UInt32 = ${u32_0} (possibly m_nTransID)`);
+
+      if (payload.length >= 6) {
+        const u16_4 = payload.readUInt16LE(4);
+        console.log(`  offset 4: UInt16 = ${u16_4} (possibly m_nType/m_nRequestType)`);
+      }
+
+      if (payload.length >= 8) {
+        const u16_6 = payload.readUInt16LE(6);
+        console.log(`  offset 6: UInt16 = ${u16_6}`);
+      }
+
+      if (payload.length >= 12) {
+        const u32_8 = payload.readUInt32LE(8);
+        console.log(`  offset 8: UInt32 = ${u32_8}`);
+      }
+
+      // Try to find strings (length-prefixed)
+      console.log();
+      console.log(`[STRING SEARCH]`);
+      console.log(`${'─'.repeat(80)}`);
+      findStrings(payload);
+
+    } catch (e) {
+      console.log(`  (failed to parse fields: ${e})`);
+    }
+  }
+
+  console.log();
+  console.log(`${'='.repeat(80)}\n`);
+}
+
+function printHexDump(buffer: Buffer): void {
+  const bytesPerLine = 16;
+  for (let i = 0; i < buffer.length; i += bytesPerLine) {
+    const line = buffer.subarray(i, Math.min(i + bytesPerLine, buffer.length));
+
+    // Offset
+    const offset = i.toString(16).padStart(8, '0');
+
+    // Hex bytes
+    const hexParts: string[] = [];
+    for (let j = 0; j < bytesPerLine; j++) {
+      if (j < line.length) {
+        hexParts.push(line[j].toString(16).padStart(2, '0'));
+      } else {
+        hexParts.push('  ');
+      }
+    }
+    const hex = hexParts.join(' ');
+
+    // ASCII representation
+    let ascii = '';
+    for (let j = 0; j < line.length; j++) {
+      const byte = line[j];
+      if (byte >= 32 && byte <= 126) {
+        ascii += String.fromCharCode(byte);
+      } else {
+        ascii += '.';
+      }
+    }
+
+    console.log(`  ${offset}  ${hex}  |${ascii}|`);
+  }
+}
+
+function findStrings(buffer: Buffer): void {
+  // Look for length-prefixed strings (UInt16 length + UTF-8 data)
+  for (let i = 0; i < buffer.length - 2; i++) {
+    const length = buffer.readUInt16LE(i);
+    if (length > 0 && length < 500 && i + 2 + length <= buffer.length) {
+      const str = buffer.subarray(i + 2, i + 2 + length);
+      // Check if it looks like printable ASCII/UTF-8
+      let printable = true;
+      for (let j = 0; j < str.length; j++) {
+        if (str[j] < 32 && str[j] !== 10 && str[j] !== 13 && str[j] !== 9) {
+          printable = false;
+          break;
+        }
+      }
+      if (printable && str.length > 2) {
+        const text = str.toString('utf8');
+        console.log(`  offset ${i}: String[${length}] = "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"`);
+      }
+    }
   }
 }
 

@@ -5,7 +5,7 @@
  */
 
 import { expect, test, describe } from "bun:test";
-import { BinaryReader, BinaryWriter } from "./binary";
+import { BinaryReader, BinaryWriter } from "../../protocol/binary";
 
 describe("BinaryWriter", () => {
   test("writes primitives correctly", () => {
