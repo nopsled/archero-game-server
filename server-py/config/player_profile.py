@@ -46,7 +46,9 @@ def _parse_profile(raw: dict[str, Any]) -> PlayerProfile:
         exp=int(raw.get("exp", DEFAULT_PROFILE.exp)),
         talent=int(raw.get("talent", DEFAULT_PROFILE.talent)),
         character_id=(
-            int(raw["character_id"]) if "character_id" in raw and raw["character_id"] is not None else None
+            int(raw["character_id"])
+            if "character_id" in raw and raw["character_id"] is not None
+            else None
         ),
     )
 
@@ -79,4 +81,3 @@ def load_player_profile() -> PlayerProfile:
             print(f"[Config] Failed to parse ARCHERO_PLAYER_PROFILE_JSON: {e}")
 
     return DEFAULT_PROFILE
-

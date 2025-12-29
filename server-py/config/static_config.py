@@ -17,21 +17,35 @@ class ConfigSource:
 CONFIG_BY_FILENAME: dict[str, ConfigSource] = {
     "MazeConfig.json": ConfigSource("server.config.maze_config", "RESPONSE_TO_CLIENT"),
     "pvp_reward.json": ConfigSource("server.config.pvp_reward", "RESPONSE"),
-    "shop_in_app_purchase.json": ConfigSource("server.config.shop_in_app_purchase", "RESPONSE"),
+    "shop_in_app_purchase.json": ConfigSource(
+        "server.config.shop_in_app_purchase", "RESPONSE"
+    ),
     "pve_season.json": ConfigSource("server.config.pve_season", "RESPONSE"),
     "dailySeasonData.json": ConfigSource("server.config.daily_season_data", "RESPONSE"),
-    "activity_christmas.json": ConfigSource("server.config.activity_christmas", "RESPONSE"),
-    "farm_pvp_rank_reward.json": ConfigSource("server.config.farm_pvp_rank_reward", "RESPONSE"),
+    "activity_christmas.json": ConfigSource(
+        "server.config.activity_christmas", "RESPONSE"
+    ),
+    "farm_pvp_rank_reward.json": ConfigSource(
+        "server.config.farm_pvp_rank_reward", "RESPONSE"
+    ),
     "game_choice_box.json": ConfigSource("server.config.game_choice_box", "RESPONSE"),
     "farm_pvp_season.json": ConfigSource("server.config.farm_pvp_season", "RESPONSE"),
     "MazeLine.json": ConfigSource("server.config.maze_line", "RESPONSE"),
-    "pve_stage_rank_reward.json": ConfigSource("server.config.pve_stage_rank_reward", "RESPONSE"),
+    "pve_stage_rank_reward.json": ConfigSource(
+        "server.config.pve_stage_rank_reward", "RESPONSE"
+    ),
     "pvp_season.json": ConfigSource("server.config.pvp_season", "RESPONSE"),
-    "pve_week_rank_reward.json": ConfigSource("server.config.pve_week_rank_reward", "RESPONSE"),
+    "pve_week_rank_reward.json": ConfigSource(
+        "server.config.pve_week_rank_reward", "RESPONSE"
+    ),
     "game_config.json": ConfigSource("server.config.game_config", "RESPONSE"),
-    "game_activity_treasure.json": ConfigSource("server.config.game_activity_treasure", "RESPONSE"),
+    "game_activity_treasure.json": ConfigSource(
+        "server.config.game_activity_treasure", "RESPONSE"
+    ),
     "worldcup_matches.json": ConfigSource("server.config.worldcup_matches", "RESPONSE"),
-    "battlePassConfigData.json": ConfigSource("server.config.battle_pass_config_data", "RESPONSE"),
+    "battlePassConfigData.json": ConfigSource(
+        "server.config.battle_pass_config_data", "RESPONSE"
+    ),
 }
 
 

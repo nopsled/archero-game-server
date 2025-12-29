@@ -301,7 +301,9 @@ def _http_response(status: str, headers: dict[str, str], body: bytes) -> bytes:
     return head_bytes + body
 
 
-def _json_response(obj: object, *, status: str = "200 OK", headers: dict[str, str] | None = None) -> bytes:
+def _json_response(
+    obj: object, *, status: str = "200 OK", headers: dict[str, str] | None = None
+) -> bytes:
     body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     h = {"Content-Type": "application/json; charset=UTF-8"}
     if headers:
@@ -592,7 +594,11 @@ class Client:
                         path = ""
 
                     host = headers.get("Host", "")
-                    parsed_url = urllib.parse.urlsplit(path) if path else urllib.parse.SplitResult("", "", "", "", "")
+                    parsed_url = (
+                        urllib.parse.urlsplit(path)
+                        if path
+                        else urllib.parse.SplitResult("", "", "", "", "")
+                    )
                     path_only = parsed_url.path or path
                     query_params = urllib.parse.parse_qs(parsed_url.query or "")
 
@@ -604,21 +610,35 @@ class Client:
                             name = str(query_params["name"][0] or "").strip()
                         if name:
                             ACTIVE_CONFIG_PROFILE = name
-                        response = _json_response({"code": 0, "data": {"profile": ACTIVE_CONFIG_PROFILE}, "msg": ""})
+                        response = _json_response(
+                            {
+                                "code": 0,
+                                "data": {"profile": ACTIVE_CONFIG_PROFILE},
+                                "msg": "",
+                            }
+                        )
                         self.socket.sendall(response)
-                        print(f"[+] API request: {method} {path} host={host} -> config profile={ACTIVE_CONFIG_PROFILE!r}")
+                        print(
+                            f"[+] API request: {method} {path} host={host} -> config profile={ACTIVE_CONFIG_PROFILE!r}"
+                        )
                         continue
 
                     # Serve dumped config files from the sandbox server.
-                    if path_only.startswith("/data/config/") and path_only.lower().endswith(".json"):
+                    if path_only.startswith(
+                        "/data/config/"
+                    ) and path_only.lower().endswith(".json"):
                         filename = path_only.split("/")[-1]
-                        cfg = load_config_json(filename, profile=ACTIVE_CONFIG_PROFILE or None)
+                        cfg = load_config_json(
+                            filename, profile=ACTIVE_CONFIG_PROFILE or None
+                        )
                         if cfg is None:
                             # Many builds request a large set of optional config blobs.
                             # Serve a valid JSON object rather than the default API wrapper,
                             # so Unity's config loader doesn't fail JSON parsing.
                             cfg = "{}"
-                            print(f"[!] Missing sandbox config {filename}; serving empty JSON object")
+                            print(
+                                f"[!] Missing sandbox config {filename}; serving empty JSON object"
+                            )
                         payload = cfg.encode("utf-8")
                         response = _http_response(
                             "200 OK",
@@ -661,26 +681,35 @@ class Client:
 
                     # Mailbox / Habby mail service. We don't know full schemas yet; log clearly.
                     if host.startswith("mail-") or "/mail" in path_only.lower():
-                        response = _json_response({"code": 0, "msg": "", "data": {"list": []}})
+                        response = _json_response(
+                            {"code": 0, "msg": "", "data": {"list": []}}
+                        )
                         self.socket.sendall(response)
-                        print(f"[Mailbox] API request: {method} {path} host={host} -> mail stub")
+                        print(
+                            f"[Mailbox] API request: {method} {path} host={host} -> mail stub"
+                        )
                         continue
 
                     # Minimal endpoints needed for bootstrapping.
                     if re.match(r"^/users/\\d+/announcements", path_only):
                         response = _json_response({"code": 0, "data": {"list": []}})
                         self.socket.sendall(response)
-                        print(f"[Mailbox] API request: {method} {path} host={host} -> announcements")
+                        print(
+                            f"[Mailbox] API request: {method} {path} host={host} -> announcements"
+                        )
                         continue
 
                     if path_only.startswith("/config"):
                         # Let you iterate quickly: override with a JSON file or inline JSON, without code changes.
                         override = _load_json_override(
-                            "ARCHERO_CONFIG_BOOTSTRAP_PATH", "ARCHERO_CONFIG_BOOTSTRAP_JSON"
+                            "ARCHERO_CONFIG_BOOTSTRAP_PATH",
+                            "ARCHERO_CONFIG_BOOTSTRAP_JSON",
                         )
                         if override is not None:
                             self.socket.sendall(_json_response(override))
-                            print(f"[+] API request: {path} host={host} -> config bootstrap (override)")
+                            print(
+                                f"[+] API request: {path} host={host} -> config bootstrap (override)"
+                            )
                             continue
 
                         # Default minimal stub for requests that look like the real bootstrap call.
@@ -688,12 +717,17 @@ class Client:
                             response = _json_response(
                                 {
                                     "code": 0,
-                                    "data": {"sync_batch_size": 100, "sync_interval": 60},
+                                    "data": {
+                                        "sync_batch_size": 100,
+                                        "sync_interval": 60,
+                                    },
                                     "msg": "",
                                 }
                             )
                             self.socket.sendall(response)
-                            print(f"[+] API request: {path} host={host} -> config bootstrap")
+                            print(
+                                f"[+] API request: {path} host={host} -> config bootstrap"
+                            )
                             continue
 
                     if path_only == "/sandbox/player":
@@ -744,13 +778,17 @@ class Client:
                             }
                         )
                         self.socket.sendall(response)
-                        print(f"[+] API request: {method} {path} host={host} -> sync stub")
+                        print(
+                            f"[+] API request: {method} {path} host={host} -> sync stub"
+                        )
                         continue
 
                     # Default: return a harmless OK so we can observe what the client does next.
                     response = _json_response({"code": 0, "msg": "", "data": {}})
                     self.socket.sendall(response)
-                    print(f"[+] API request: {method} {path} host={host} -> default stub")
+                    print(
+                        f"[+] API request: {method} {path} host={host} -> default stub"
+                    )
                     continue
 
 
