@@ -953,8 +953,7 @@ export class Patcher {
                 ((allowlistedHost != null &&
                   matchesAny(connectRedirect.allowlistHosts, allowlistedHost)) ||
                   resolvedHosts.some((host) => matchesAny(connectRedirect.allowlistHosts, host)));
-              const ipAllowed =
-                hasIpAllowlist && connectRedirect.allowlistIps.includes(originalIp);
+              const ipAllowed = hasIpAllowlist && connectRedirect.allowlistIps.includes(originalIp);
               const allowAll = !hasHostAllowlist && !hasIpAllowlist;
 
               let didRedirect = false;

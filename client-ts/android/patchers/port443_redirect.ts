@@ -2,7 +2,7 @@
 
 /**
  * Port 443 Redirect Agent with Comprehensive SSL Pinning Bypass
- * 
+ *
  * Combines NativeTlsBypass + FridaMultipleUnpinning + connect redirect.
  */
 
@@ -49,12 +49,14 @@ function findExport(name: string): NativePointerOrNull {
 const redirectedFds = new Set<number>();
 
 // Helper to parse sockaddr_in
-function parseSockaddr(sockaddr: NativePointer): { family: number; port: number; ip: string } | null {
+function parseSockaddr(
+  sockaddr: NativePointer
+): { family: number; port: number; ip: string } | null {
   if (sockaddr.isNull()) return null;
   const family = sockaddr.readU16();
   if (family !== 2) return null; // Only AF_INET
   const port = ((sockaddr.add(2).readU8() << 8) | sockaddr.add(3).readU8()) & 0xffff;
-  const ip = [4,5,6,7].map(i => sockaddr.add(i).readU8()).join(".");
+  const ip = [4, 5, 6, 7].map((i) => sockaddr.add(i).readU8()).join(".");
   return { family, port, ip };
 }
 
@@ -68,7 +70,7 @@ if (connectPtr) {
       const fd = args[0].toInt32();
       const addr = parseSockaddr(args[1]);
       if (!addr) return;
-      
+
       if (addr.port === TARGET_PORT) {
         // Redirect to sandbox
         const parts = SANDBOX_IP.split(".");
@@ -76,9 +78,11 @@ if (connectPtr) {
           args[1].add(4 + i).writeU8(parseInt(parts[i], 10) & 0xff);
         }
         redirectedFds.add(fd);
-        console.log(`[ssl-bypass] REDIRECT: ${addr.ip}:${addr.port} -> ${SANDBOX_IP}:${TARGET_PORT} (fd=${fd})`);
+        console.log(
+          `[ssl-bypass] REDIRECT: ${addr.ip}:${addr.port} -> ${SANDBOX_IP}:${TARGET_PORT} (fd=${fd})`
+        );
       }
-    }
+    },
   });
   console.log("[ssl-bypass] connect() hook installed");
 }
@@ -90,14 +94,18 @@ if (sendPtr) {
     onEnter(args) {
       const fd = args[0].toInt32();
       if (!redirectedFds.has(fd)) return;
-      
+
       const len = args[2].toInt32();
       const buf = args[1];
       const preview = len > 0 ? buf.readByteArray(Math.min(len, 32)) : null;
-      const hex = preview ? Array.from(new Uint8Array(preview)).map(b => b.toString(16).padStart(2, '0')).join('') : '';
-      
+      const hex = preview
+        ? Array.from(new Uint8Array(preview))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+        : "";
+
       console.log(`[ssl-bypass] SEND fd=${fd} len=${len} hex=${hex}${len > 32 ? "..." : ""}`);
-    }
+    },
   });
   console.log("[ssl-bypass] send() hook installed");
 }
@@ -115,11 +123,15 @@ if (recvPtr) {
       if (!this.tracked) return;
       const len = retval.toInt32();
       if (len <= 0) return;
-      
+
       const preview = this.buf.readByteArray(Math.min(len, 32));
-      const hex = preview ? Array.from(new Uint8Array(preview)).map(b => b.toString(16).padStart(2, '0')).join('') : '';
+      const hex = preview
+        ? Array.from(new Uint8Array(preview))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+        : "";
       console.log(`[ssl-bypass] RECV fd=${this.fd} len=${len} hex=${hex}${len > 32 ? "..." : ""}`);
-    }
+    },
   });
   console.log("[ssl-bypass] recv() hook installed");
 }
@@ -134,7 +146,7 @@ if (closePtr) {
         console.log(`[ssl-bypass] CLOSE fd=${fd}`);
         redirectedFds.delete(fd);
       }
-    }
+    },
   });
 }
 
@@ -145,7 +157,7 @@ if (sslSetTlsextHostName) {
     onEnter(args) {
       const hostname = args[1].readCString();
       console.log(`[ssl-bypass] SNI hostname: ${hostname}`);
-    }
+    },
   });
   console.log("[ssl-bypass] ✓ SSL_set_tlsext_host_name hooked");
 }

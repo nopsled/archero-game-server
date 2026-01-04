@@ -104,45 +104,58 @@ function safeString(val: any): string {
  */
 function dumpAllFields(instance: any, depth: number = 0): Record<string, any> {
   if (depth > 3) return { _depth: "max reached" };
-  
+
   const result: Record<string, any> = {};
-  
+
   try {
     if (!instance || !instance.class) return result;
-    
+
     instance.class.fields.forEach((field: any) => {
       if (field.isStatic) return;
-      
+
       const fieldName = field.name;
       const typeName = field.type ? field.type.name : "unknown";
-      
+
       try {
         const value = instance.field(fieldName).value;
-        
+
         // Handle null/undefined
         if (value === null || value === undefined) {
           result[fieldName] = null;
           return;
         }
-        
+
         // String
         if (typeName === "String") {
           result[fieldName] = value.content ?? null;
           return;
         }
-        
+
         // Boolean
         if (typeName === "Boolean" || typeName === "bool") {
           result[fieldName] = !!value;
           return;
         }
-        
+
         // Numeric primitives
-        if (["Int32", "UInt32", "Int64", "UInt64", "Int16", "UInt16", "Byte", "SByte", "Single", "Double"].includes(typeName)) {
+        if (
+          [
+            "Int32",
+            "UInt32",
+            "Int64",
+            "UInt64",
+            "Int16",
+            "UInt16",
+            "Byte",
+            "SByte",
+            "Single",
+            "Double",
+          ].includes(typeName)
+        ) {
           result[fieldName] = Number(value);
           return;
         }
-        
+
         // Byte array - provide hex dump
         if (typeName === "Byte[]") {
           const len = value.length || 0;
@@ -158,21 +171,21 @@ function dumpAllFields(instance: any, depth: number = 0): Record<string, any> {
           }
           return;
         }
-        
+
         // UInt16 array
         if (typeName === "UInt16[]") {
           const len = value.length || 0;
           result[fieldName] = { type: "uint16[]", length: len } as FieldValue;
           return;
         }
-        
+
         // Generic arrays
         if (typeName.endsWith("[]")) {
           const len = value.length || 0;
           result[fieldName] = { type: typeName, length: len } as FieldValue;
           return;
         }
-        
+
         // List<T>
         if (typeName.startsWith("List`1")) {
           try {
@@ -183,7 +196,7 @@ function dumpAllFields(instance: any, depth: number = 0): Record<string, any> {
           }
           return;
         }
-        
+
         // Dictionary<K,V>
         if (typeName.startsWith("Dictionary`2")) {
           try {
@@ -194,7 +207,7 @@ function dumpAllFields(instance: any, depth: number = 0): Record<string, any> {
           }
           return;
         }
-        
+
         // Nested objects - recurse with depth limit
         if (value.class && depth < 2) {
           const nested = dumpAllFields(value, depth + 1);
@@ -205,10 +218,9 @@ function dumpAllFields(instance: any, depth: number = 0): Record<string, any> {
           }
           return;
         }
-        
+
         // Fallback
         result[fieldName] = safeString(value);
-        
       } catch (e: any) {
         result[fieldName] = `<error: ${e.message || e}>`;
       }
@@ -216,7 +228,7 @@ function dumpAllFields(instance: any, depth: number = 0): Record<string, any> {
   } catch (e: any) {
     result._error = e.message || String(e);
   }
-  
+
   return result;
 }
 
@@ -229,13 +241,21 @@ function printFields(fields: Record<string, any>, indent: string = "│   "): vo
       console.log(`${ts()} ${indent}${key}: {${value.type}}`);
       printFields(value.fields, indent + "  ");
     } else if (value && typeof value === "object" && value.type) {
-      const extra = value.length !== undefined ? `, len=${value.length}` : 
-                    value.count !== undefined ? `, count=${value.count}` : "";
-      const hex = value.hex ? ` [${value.hex.substring(0, 32)}${value.hex.length > 32 ? "..." : ""}]` : "";
+      const extra =
+        value.length !== undefined
+          ? `, len=${value.length}`
+          : value.count !== undefined
+            ? `, count=${value.count}`
+            : "";
+      const hex = value.hex
+        ? ` [${value.hex.substring(0, 32)}${value.hex.length > 32 ? "..." : ""}]`
+        : "";
       console.log(`${ts()} ${indent}${key}: ${value.type}${extra}${hex}`);
     } else {
       const display = JSON.stringify(value);
-      console.log(`${ts()} ${indent}${key}: ${display.length > 100 ? display.substring(0, 100) + "..." : display}`);
+      console.log(
+        `${ts()} ${indent}${key}: ${display.length > 100 ? display.substring(0, 100) + "..." : display}`
+      );
     }
   }
 }
@@ -246,14 +266,18 @@ function printFields(fields: Record<string, any>, indent: string = "│   "): vo
 
 function hookNativeNetwork(): void {
   console.log("[NATIVE] Setting up DNS/Socket hooks...");
-  
+
   try {
     // Hook getaddrinfo for DNS
     const getaddrinfoPtr = Module.findExportByName(null, "getaddrinfo");
     if (getaddrinfoPtr) {
       Interceptor.attach(getaddrinfoPtr, {
         onEnter(args) {
-          try { this.hostname = args[0].readUtf8String(); } catch (e) { this.hostname = null; }
+          try {
+            this.hostname = args[0].readUtf8String();
+          } catch (e) {
+            this.hostname = null;
+          }
         },
         onLeave(retval) {
           try {
@@ -264,8 +288,8 @@ function hookNativeNetwork(): void {
               }
               logEvent({ t: elapsed(), phase: "dns", data: { hostname: this.hostname } });
             }
-          } catch (e) { }
-        }
+          } catch (e) {}
+        },
       });
       console.log("   ✓ getaddrinfo hooked");
     }
@@ -279,7 +303,8 @@ function hookNativeNetwork(): void {
             const sockaddr = args[1];
             const family = sockaddr.readU16();
 
-            if (family === 2) { // AF_INET
+            if (family === 2) {
+              // AF_INET
               const portBE = sockaddr.add(2).readU16();
               const port = ((portBE & 0xff) << 8) | ((portBE >> 8) & 0xff);
               const ip = `${sockaddr.add(4).readU8()}.${sockaddr.add(5).readU8()}.${sockaddr.add(6).readU8()}.${sockaddr.add(7).readU8()}`;
@@ -290,8 +315,8 @@ function hookNativeNetwork(): void {
                 logEvent({ t: elapsed(), phase: "connect", data: { ip, port } });
               }
             }
-          } catch (e) { }
-        }
+          } catch (e) {}
+        },
       });
       console.log("   ✓ connect hooked");
     }
@@ -306,7 +331,7 @@ function hookNativeNetwork(): void {
 
 function hookSockets(): void {
   console.log("[NATIVE] Setting up socket send/recv hooks...");
-  
+
   try {
     const sendPtr = Module.findExportByName(null, "send");
     if (sendPtr) {
@@ -314,25 +339,32 @@ function hookSockets(): void {
         onEnter(args) {
           const fd = args[0].toInt32();
           const socktype = Socket.type(fd);
-          
+
           if (socktype !== "tcp" && socktype !== "tcp6") return;
-          
+
           const address = Socket.peerAddress(fd);
           if (address === null) return;
-          
+
           const data = args[1];
           const size = args[2].toInt32();
-          
+
           if (size > 0 && size < 10000) {
             console.log(`${ts()} [SOCKET:send] → ${JSON.stringify(address)} (${size} bytes)`);
             try {
               const buffer = data.readByteArray(Math.min(size, 256));
               if (buffer) {
-                console.log(hexdump(buffer, { offset: 0, length: Math.min(size, 256), header: false, ansi: true }));
+                console.log(
+                  hexdump(buffer, {
+                    offset: 0,
+                    length: Math.min(size, 256),
+                    header: false,
+                    ansi: true,
+                  })
+                );
               }
             } catch (e) {}
           }
-        }
+        },
       });
       console.log("   ✓ send hooked");
     }
@@ -347,20 +379,20 @@ function hookSockets(): void {
 
 function hookIl2Cpp(): void {
   console.log("[IL2CPP] Waiting for runtime...");
-  
+
   Il2Cpp.perform(() => {
     discoveryStartTime = Date.now();
     console.log(`${ts()} [IL2CPP] Runtime ready, installing hooks...`);
-    
+
     // List available assemblies for debugging
     console.log(`${ts()} [IL2CPP] Available assemblies:`);
-    Il2Cpp.domain.assemblies.forEach(asm => {
+    Il2Cpp.domain.assemblies.forEach((asm) => {
       console.log(`   - ${asm.name}`);
     });
-    
+
     try {
       const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
-      
+
       discoverGameProtocolClasses(asm);
       hookLoginPackets(asm);
       hookNetworkLayer(asm);
@@ -368,14 +400,15 @@ function hookIl2Cpp(): void {
       hookTcpNetManager(asm);
       hookEncryption(asm);
       hookHttpLayer();
-      
-      console.log(`\n${ts()} [READY] All hooks installed. Capturing for ${DISCOVERY_DURATION_MS / 1000}s...`);
+
+      console.log(
+        `\n${ts()} [READY] All hooks installed. Capturing for ${DISCOVERY_DURATION_MS / 1000}s...`
+      );
       console.log("═".repeat(66));
-      
+
       setTimeout(() => {
         printSummary();
       }, DISCOVERY_DURATION_MS);
-      
     } catch (e) {
       console.log(`${ts()} [ERROR] Failed to hook Assembly-CSharp: ${e}`);
     }
@@ -388,29 +421,30 @@ function hookIl2Cpp(): void {
 
 function discoverGameProtocolClasses(asm: Il2Cpp.Image): void {
   console.log(`${ts()} [DISCOVER] Scanning GameProtocol namespace...`);
-  
+
   const gameProtocolClasses: string[] = [];
-  
+
   try {
-    asm.classes.forEach(clazz => {
+    asm.classes.forEach((clazz) => {
       if (clazz.namespace === "GameProtocol") {
         gameProtocolClasses.push(clazz.name);
       }
     });
-    
+
     console.log(`${ts()}   Found ${gameProtocolClasses.length} GameProtocol classes`);
-    
+
     // Log interesting ones
-    const loginRelated = gameProtocolClasses.filter(name => 
-      name.toLowerCase().includes("login") || 
-      name.toLowerCase().includes("user") ||
-      name.toLowerCase().includes("sync") ||
-      name.toLowerCase().includes("heartbeat") ||
-      name.toLowerCase().includes("resp")
+    const loginRelated = gameProtocolClasses.filter(
+      (name) =>
+        name.toLowerCase().includes("login") ||
+        name.toLowerCase().includes("user") ||
+        name.toLowerCase().includes("sync") ||
+        name.toLowerCase().includes("heartbeat") ||
+        name.toLowerCase().includes("resp")
     );
-    
+
     console.log(`${ts()}   Auth-related classes:`);
-    loginRelated.slice(0, 20).forEach(name => console.log(`${ts()}     - GameProtocol.${name}`));
+    loginRelated.slice(0, 20).forEach((name) => console.log(`${ts()}     - GameProtocol.${name}`));
     if (loginRelated.length > 20) {
       console.log(`${ts()}     ... and ${loginRelated.length - 20} more`);
     }
@@ -425,7 +459,7 @@ function discoverGameProtocolClasses(asm: Il2Cpp.Image): void {
 
 function hookLoginPackets(asm: Il2Cpp.Image): void {
   console.log(`${ts()} [HOOK] GameProtocol login packets...`);
-  
+
   const packetClasses = [
     "GameProtocol.CUserLoginPacket",
     "GameProtocol.CRespUserLoginPacket",
@@ -434,26 +468,26 @@ function hookLoginPackets(asm: Il2Cpp.Image): void {
     "GameProtocol.CSyncUserPacket",
     "GameProtocol.CRespSyncUserPacket",
   ];
-  
+
   for (const fullName of packetClasses) {
     try {
       const clazz = asm.class(fullName);
       const name = fullName.split(".").pop()!;
-      
+
       // Hook WriteToStream
       try {
-        clazz.method("WriteToStream").implementation = function(writer: any) {
+        clazz.method("WriteToStream").implementation = function (writer: any) {
           const fields = dumpAllFields(this);
           const isLogin = name === "CUserLoginPacket";
-          
+
           console.log(`\n${ts()} ┌─────────────────────────────────────────────────`);
           console.log(`${ts()} │ 📤 PACKET OUT: ${name}`);
           console.log(`${ts()} ├─────────────────────────────────────────────────`);
           printFields(fields);
           console.log(`${ts()} └─────────────────────────────────────────────────\n`);
-          
+
           if (isLogin) loginPacketSent = true;
-          
+
           logEvent({
             t: elapsed(),
             phase: "packet",
@@ -462,31 +496,31 @@ function hookLoginPackets(asm: Il2Cpp.Image): void {
             method: "WriteToStream",
             data: fields,
           });
-          
+
           packetCaptures.push({
             t: elapsed(),
             direction: "C→S",
             msgTypeName: name,
             fields,
           });
-          
+
           return this.method("WriteToStream").invoke(writer);
         };
         console.log(`${ts()}   ✓ ${name}.WriteToStream`);
       } catch (e) {
         // Try OnWriteToStream for some packet types
         try {
-          clazz.method("OnWriteToStream").implementation = function(writer: any) {
+          clazz.method("OnWriteToStream").implementation = function (writer: any) {
             const fields = dumpAllFields(this);
-            
+
             console.log(`\n${ts()} ┌─────────────────────────────────────────────────`);
             console.log(`${ts()} │ 📤 PACKET OUT: ${name}`);
             console.log(`${ts()} ├─────────────────────────────────────────────────`);
             printFields(fields);
             console.log(`${ts()} └─────────────────────────────────────────────────\n`);
-            
+
             if (name === "CUserLoginPacket") loginPacketSent = true;
-            
+
             logEvent({
               t: elapsed(),
               phase: "packet",
@@ -495,35 +529,35 @@ function hookLoginPackets(asm: Il2Cpp.Image): void {
               method: "OnWriteToStream",
               data: fields,
             });
-            
+
             packetCaptures.push({
               t: elapsed(),
               direction: "C→S",
               msgTypeName: name,
               fields,
             });
-            
+
             return this.method("OnWriteToStream").invoke(writer);
           };
           console.log(`${ts()}   ✓ ${name}.OnWriteToStream`);
         } catch (e2) {}
       }
-      
+
       // Hook ReadFromStream
       try {
-        clazz.method("ReadFromStream").implementation = function(reader: any) {
+        clazz.method("ReadFromStream").implementation = function (reader: any) {
           const result = this.method("ReadFromStream").invoke(reader);
           const fields = dumpAllFields(this);
           const isLoginResp = name === "CRespUserLoginPacket";
-          
+
           console.log(`\n${ts()} ┌─────────────────────────────────────────────────`);
           console.log(`${ts()} │ 📥 PACKET IN: ${name}`);
           console.log(`${ts()} ├─────────────────────────────────────────────────`);
           printFields(fields);
           console.log(`${ts()} └─────────────────────────────────────────────────\n`);
-          
+
           if (isLoginResp) loginResponseReceived = true;
-          
+
           logEvent({
             t: elapsed(),
             phase: "packet",
@@ -532,19 +566,18 @@ function hookLoginPackets(asm: Il2Cpp.Image): void {
             method: "ReadFromStream",
             data: fields,
           });
-          
+
           packetCaptures.push({
             t: elapsed(),
             direction: "S→C",
             msgTypeName: name,
             fields,
           });
-          
+
           return result;
         };
         console.log(`${ts()}   ✓ ${name}.ReadFromStream`);
       } catch (e) {}
-      
     } catch (e) {}
   }
 }
@@ -555,25 +588,26 @@ function hookLoginPackets(asm: Il2Cpp.Image): void {
 
 function hookNetworkLayer(asm: Il2Cpp.Image): void {
   console.log(`${ts()} [HOOK] Network layer...`);
-  
+
   const netClasses = ["Dxx.Net.NetManager", "Dxx.Net.NetConfig"];
-  
+
   for (const fullName of netClasses) {
     try {
       const clazz = asm.class(fullName);
       const shortName = fullName.split(".").pop()!;
-      
-      clazz.methods.forEach(method => {
-        if (["ToString", "GetHashCode", "Equals", "Finalize", ".cctor"].includes(method.name)) return;
+
+      clazz.methods.forEach((method) => {
+        if (["ToString", "GetHashCode", "Equals", "Finalize", ".cctor"].includes(method.name))
+          return;
         if (method.name.startsWith("get_") || method.name.startsWith("set_")) return;
-        
+
         const patterns = ["Connect", "Send", "Receive", "Init", "Start", "Login", "Request"];
-        if (patterns.some(p => method.name.includes(p))) {
+        if (patterns.some((p) => method.name.includes(p))) {
           try {
-            clazz.method(method.name).implementation = function(...args: any[]) {
-              const argStrs = args.map(a => safeString(a));
+            clazz.method(method.name).implementation = function (...args: any[]) {
+              const argStrs = args.map((a) => safeString(a));
               console.log(`${ts()} [NET] ${shortName}.${method.name}(${argStrs.join(", ")})`);
-              
+
               logEvent({
                 t: elapsed(),
                 phase: "net",
@@ -581,13 +615,13 @@ function hookNetworkLayer(asm: Il2Cpp.Image): void {
                 method: method.name,
                 data: { args: argStrs },
               });
-              
+
               return this.method(method.name).invoke(...args);
             };
           } catch (e) {}
         }
       });
-      
+
       console.log(`${ts()}   ✓ ${shortName}`);
     } catch (e) {}
   }
@@ -599,15 +633,15 @@ function hookNetworkLayer(asm: Il2Cpp.Image): void {
 
 function hookTcpLayer(asm: Il2Cpp.Image): void {
   console.log(`${ts()} [HOOK] TCP layer...`);
-  
+
   try {
     const tcpServer = asm.class("TcpServer.TcpServer");
-    
+
     try {
-      tcpServer.method("SendPacket").implementation = function(packet: any) {
+      tcpServer.method("SendPacket").implementation = function (packet: any) {
         const packetType = packet && packet.class ? packet.class.name : "unknown";
         console.log(`${ts()} [TCP] SendPacket → ${packetType}`);
-        
+
         logEvent({
           t: elapsed(),
           phase: "tcp",
@@ -616,16 +650,16 @@ function hookTcpLayer(asm: Il2Cpp.Image): void {
           method: "SendPacket",
           data: { packetType },
         });
-        
+
         return this.method("SendPacket").invoke(packet);
       };
       console.log(`${ts()}   ✓ TcpServer.SendPacket`);
     } catch (e) {}
-    
+
     try {
-      tcpServer.method("OnReceive").implementation = function(data: any, len: any) {
+      tcpServer.method("OnReceive").implementation = function (data: any, len: any) {
         console.log(`${ts()} [TCP] OnReceive ← ${len} bytes`);
-        
+
         logEvent({
           t: elapsed(),
           phase: "tcp",
@@ -634,12 +668,11 @@ function hookTcpLayer(asm: Il2Cpp.Image): void {
           method: "OnReceive",
           data: { length: Number(len) },
         });
-        
+
         return this.method("OnReceive").invoke(data, len);
       };
       console.log(`${ts()}   ✓ TcpServer.OnReceive`);
     } catch (e) {}
-    
   } catch (e) {
     console.log(`${ts()}   ✗ TcpServer not found`);
   }
@@ -651,15 +684,15 @@ function hookTcpLayer(asm: Il2Cpp.Image): void {
 
 function hookTcpNetManager(asm: Il2Cpp.Image): void {
   console.log(`${ts()} [HOOK] TcpNetManager...`);
-  
+
   try {
     const tcpNetMgr = asm.class("TcpNetManager");
-    
+
     try {
-      tcpNetMgr.method("SendPacket").implementation = function(packet: any, msgId: any) {
+      tcpNetMgr.method("SendPacket").implementation = function (packet: any, msgId: any) {
         const packetType = packet && packet.class ? packet.class.name : "unknown";
         console.log(`${ts()} [TCPNET] SendPacket(${msgId}) → ${packetType}`);
-        
+
         logEvent({
           t: elapsed(),
           phase: "tcpnet",
@@ -668,17 +701,17 @@ function hookTcpNetManager(asm: Il2Cpp.Image): void {
           method: "SendPacket",
           data: { packetType, msgId: Number(msgId) },
         });
-        
+
         return this.method("SendPacket").invoke(packet, msgId);
       };
       console.log(`${ts()}   ✓ TcpNetManager.SendPacket`);
     } catch (e) {}
-    
+
     try {
-      tcpNetMgr.method("SendBuffer").implementation = function(buffer: any) {
+      tcpNetMgr.method("SendBuffer").implementation = function (buffer: any) {
         const len = buffer ? buffer.length : 0;
         console.log(`${ts()} [TCPNET] SendBuffer (${len} bytes)`);
-        
+
         logEvent({
           t: elapsed(),
           phase: "tcpnet",
@@ -687,12 +720,11 @@ function hookTcpNetManager(asm: Il2Cpp.Image): void {
           method: "SendBuffer",
           data: { length: len },
         });
-        
+
         return this.method("SendBuffer").invoke(buffer);
       };
       console.log(`${ts()}   ✓ TcpNetManager.SendBuffer`);
     } catch (e) {}
-    
   } catch (e) {
     console.log(`${ts()}   ✗ TcpNetManager not found`);
   }
@@ -704,55 +736,59 @@ function hookTcpNetManager(asm: Il2Cpp.Image): void {
 
 function hookEncryption(asm: Il2Cpp.Image): void {
   console.log(`${ts()} [HOOK] Encryption...`);
-  
+
   // NetEncrypt
   try {
     const netEncrypt = asm.class("NetEncrypt");
-    
+
     const encryptMethods = ["Encrypt", "Decrypt", "Encrypt_UTF8", "DesEncrypt", "DesDecrypt"];
     for (const methodName of encryptMethods) {
       try {
-        netEncrypt.method(methodName).implementation = function(...args: any[]) {
+        netEncrypt.method(methodName).implementation = function (...args: any[]) {
           const result = this.method(methodName).invoke(...args);
           const inputStr = args.length > 0 ? safeString(args[0]) : "";
           const outputStr = safeString(result);
-          
+
           console.log(`${ts()} [CRYPTO] NetEncrypt.${methodName}`);
-          console.log(`${ts()}   IN:  ${inputStr.substring(0, 100)}${inputStr.length > 100 ? "..." : ""}`);
-          console.log(`${ts()}   OUT: ${outputStr.substring(0, 100)}${outputStr.length > 100 ? "..." : ""}`);
-          
+          console.log(
+            `${ts()}   IN:  ${inputStr.substring(0, 100)}${inputStr.length > 100 ? "..." : ""}`
+          );
+          console.log(
+            `${ts()}   OUT: ${outputStr.substring(0, 100)}${outputStr.length > 100 ? "..." : ""}`
+          );
+
           logEvent({
             t: elapsed(),
             phase: "crypto",
             class: "NetEncrypt",
             method: methodName,
-            data: { 
+            data: {
               inputPreview: inputStr.substring(0, 50),
               outputPreview: outputStr.substring(0, 50),
             },
           });
-          
+
           return result;
         };
         console.log(`${ts()}   ✓ NetEncrypt.${methodName}`);
       } catch (e) {}
     }
   } catch (e) {}
-  
+
   // RC4Encrypter
   try {
     const rc4 = asm.class("RC4Encrypter");
-    
+
     try {
-      rc4.method("Encrypt").implementation = function(data: any, key: any) {
+      rc4.method("Encrypt").implementation = function (data: any, key: any) {
         const keyStr = safeString(key);
         const result = this.method("Encrypt").invoke(data, key);
-        
+
         console.log(`${ts()} [CRYPTO] RC4Encrypter.Encrypt`);
         console.log(`${ts()}   KEY: ${keyStr.substring(0, 32)}${keyStr.length > 32 ? "..." : ""}`);
-        
+
         encryptionKeys.push({ t: elapsed(), type: "RC4", key: keyStr });
-        
+
         logEvent({
           t: elapsed(),
           phase: "crypto",
@@ -760,26 +796,25 @@ function hookEncryption(asm: Il2Cpp.Image): void {
           method: "Encrypt",
           data: { keyPreview: keyStr.substring(0, 32) },
         });
-        
+
         return result;
       };
       console.log(`${ts()}   ✓ RC4Encrypter.Encrypt`);
     } catch (e) {}
-    
+
     // Hook constructor to capture key
     try {
-      rc4.method(".ctor").implementation = function(key: any) {
+      rc4.method(".ctor").implementation = function (key: any) {
         const keyStr = safeString(key);
         console.log(`${ts()} [CRYPTO] RC4Encrypter.ctor`);
         console.log(`${ts()}   KEY: ${keyStr.substring(0, 32)}${keyStr.length > 32 ? "..." : ""}`);
-        
+
         encryptionKeys.push({ t: elapsed(), type: "RC4_init", key: keyStr });
-        
+
         return this.method(".ctor").invoke(key);
       };
       console.log(`${ts()}   ✓ RC4Encrypter.ctor`);
     } catch (e) {}
-    
   } catch (e) {}
 }
 
@@ -789,18 +824,23 @@ function hookEncryption(asm: Il2Cpp.Image): void {
 
 function hookHttpLayer(): void {
   console.log(`${ts()} [HOOK] HTTP layer...`);
-  
+
   try {
     const habbyToolAsm = Il2Cpp.domain.assembly("HabbyToolLib").image;
     const httpManager = habbyToolAsm.class("Habby.Tool.Http.HttpManager");
-    
-    httpManager.methods.forEach(method => {
-      if (method.name.includes("Request") || method.name.includes("Send") || method.name.includes("Post") || method.name.includes("Get")) {
+
+    httpManager.methods.forEach((method) => {
+      if (
+        method.name.includes("Request") ||
+        method.name.includes("Send") ||
+        method.name.includes("Post") ||
+        method.name.includes("Get")
+      ) {
         try {
-          httpManager.method(method.name).implementation = function(...args: any[]) {
+          httpManager.method(method.name).implementation = function (...args: any[]) {
             const url = args.length > 0 ? safeString(args[0]) : "";
             console.log(`${ts()} [HTTP] HttpManager.${method.name}: ${url}`);
-            
+
             httpRequests.push({ t: elapsed(), url, method: method.name });
             logEvent({
               t: elapsed(),
@@ -809,28 +849,30 @@ function hookHttpLayer(): void {
               method: method.name,
               data: { url },
             });
-            
+
             return this.method(method.name).invoke(...args);
           };
         } catch (e) {}
       }
     });
-    
+
     console.log(`${ts()}   ✓ Habby.Tool.Http.HttpManager`);
   } catch (e) {}
-  
+
   try {
     const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
-    
+
     try {
       const httpClient = asm.class("HTTPSendClient");
-      httpClient.methods.forEach(method => {
+      httpClient.methods.forEach((method) => {
         if (method.name.includes("Send") || method.name.includes("Request")) {
           try {
-            httpClient.method(method.name).implementation = function(...args: any[]) {
-              const argStrs = args.map(a => safeString(a));
-              console.log(`${ts()} [HTTP] HTTPSendClient.${method.name}(${argStrs.join(", ").substring(0, 100)})`);
-              
+            httpClient.method(method.name).implementation = function (...args: any[]) {
+              const argStrs = args.map((a) => safeString(a));
+              console.log(
+                `${ts()} [HTTP] HTTPSendClient.${method.name}(${argStrs.join(", ").substring(0, 100)})`
+              );
+
               logEvent({
                 t: elapsed(),
                 phase: "http",
@@ -838,7 +880,7 @@ function hookHttpLayer(): void {
                 method: method.name,
                 data: { args: argStrs },
               });
-              
+
               return this.method(method.name).invoke(...args);
             };
           } catch (e) {}
@@ -855,44 +897,46 @@ function hookHttpLayer(): void {
 
 function printSummary(): void {
   const totalTime = elapsed();
-  
+
   console.log("\n");
   console.log("╔══════════════════════════════════════════════════════════════╗");
   console.log("║               AUTHENTICATION FLOW SUMMARY                    ║");
   console.log("╚══════════════════════════════════════════════════════════════╝");
-  
+
   console.log(`\n📊 Session Statistics:`);
   console.log(`   Duration: ${totalTime.toFixed(1)}s`);
   console.log(`   Total events: ${authEvents.length}`);
   console.log(`   Login packet sent: ${loginPacketSent ? "✓" : "✗"}`);
   console.log(`   Login response received: ${loginResponseReceived ? "✓" : "✗"}`);
-  
+
   console.log(`\n🌐 DNS Lookups (${dnsLookups.size} hosts):`);
   dnsLookups.forEach((ips, hostname) => {
     console.log(`   ${hostname} → ${ips.join(", ")}`);
   });
-  
+
   console.log(`\n🔌 TCP Connections (${connections.length}):`);
-  connections.forEach(c => {
+  connections.forEach((c) => {
     console.log(`   [${c.t.toFixed(2)}s] ${c.ip}:${c.port}`);
   });
-  
+
   console.log(`\n🔐 Encryption Keys Captured (${encryptionKeys.length}):`);
-  encryptionKeys.forEach(k => {
-    console.log(`   [${k.t.toFixed(2)}s] ${k.type}: ${k.key.substring(0, 40)}${k.key.length > 40 ? "..." : ""}`);
+  encryptionKeys.forEach((k) => {
+    console.log(
+      `   [${k.t.toFixed(2)}s] ${k.type}: ${k.key.substring(0, 40)}${k.key.length > 40 ? "..." : ""}`
+    );
   });
-  
+
   console.log(`\n📦 Packets Captured (${packetCaptures.length}):`);
-  packetCaptures.forEach(p => {
+  packetCaptures.forEach((p) => {
     const dir = p.direction === "C→S" ? "📤" : "📥";
     console.log(`   [${p.t.toFixed(2)}s] ${dir} ${p.msgTypeName}`);
   });
-  
+
   console.log(`\n🌍 HTTP Requests (${httpRequests.length}):`);
-  httpRequests.forEach(r => {
+  httpRequests.forEach((r) => {
     console.log(`   [${r.t.toFixed(2)}s] ${r.method}: ${r.url}`);
   });
-  
+
   console.log(`\n📅 Authentication Timeline:`);
   console.log("─".repeat(66));
   const sortedEvents = [...authEvents].sort((a, b) => a.t - b.t);
@@ -905,20 +949,28 @@ function printSummary(): void {
   if (sortedEvents.length > 50) {
     console.log(`   ... and ${sortedEvents.length - 50} more events`);
   }
-  
+
   console.log(`\n📋 JSON Summary:`);
   console.log("─".repeat(66));
   const summary = {
-    session: { duration: totalTime, loginSent: loginPacketSent, loginReceived: loginResponseReceived },
+    session: {
+      duration: totalTime,
+      loginSent: loginPacketSent,
+      loginReceived: loginResponseReceived,
+    },
     dns: Object.fromEntries(dnsLookups),
     connections,
-    encryptionKeys: encryptionKeys.map(k => ({ t: k.t, type: k.type, keyPreview: k.key.substring(0, 32) })),
-    packets: packetCaptures.map(p => ({ t: p.t, direction: p.direction, type: p.msgTypeName })),
+    encryptionKeys: encryptionKeys.map((k) => ({
+      t: k.t,
+      type: k.type,
+      keyPreview: k.key.substring(0, 32),
+    })),
+    packets: packetCaptures.map((p) => ({ t: p.t, direction: p.direction, type: p.msgTypeName })),
     http: httpRequests,
     eventCount: authEvents.length,
   };
   console.log(JSON.stringify(summary, null, 2));
-  
+
   console.log("\n" + "═".repeat(66));
 }
 

@@ -2,14 +2,14 @@
 
 /**
  * Port 12020 Redirect Patcher
- * 
+ *
  * Redirects all port 12020 (game protocol) traffic to local Python server.
  */
 
 import { Patcher } from "./core/socket_patcher";
 
 // Configuration - matches Python server
-const SANDBOX_IP = "10.0.1.22";  // Your local network IP
+const SANDBOX_IP = "10.0.1.22"; // Your local network IP
 const GAME_PORT = 12020;
 
 console.log("");
@@ -25,7 +25,7 @@ Patcher.ConfigureConnectRedirect({
   enabled: true,
   targetIp: SANDBOX_IP,
   ports: [12020],
-  allowlistHosts: [],  // No allowlist - redirect ALL 12020 traffic
+  allowlistHosts: [], // No allowlist - redirect ALL 12020 traffic
   allowlistIps: [],
 });
 
