@@ -1,5 +1,5 @@
 📦
-145262 /android/new/file_io_discovery.js
+147249 /android/new/storage_discovery.js
 ✄
 // node_modules/frida-il2cpp-bridge/dist/index.js
 var __decorate = function(decorators, target, key, desc) {
@@ -3318,88 +3318,27 @@ var Il2Cpp2;
 })(Il2Cpp2 || (Il2Cpp2 = {}));
 globalThis.Il2Cpp = Il2Cpp2;
 
-// android/new/file_io_discovery.ts
+// android/new/storage_discovery.ts
 console.log("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557");
-console.log("\u2551     ARCHERO FILE I/O DISCOVERY (Android)                     \u2551");
-console.log("\u2551     Capturing first 10 seconds of file operations            \u2551");
+console.log("\u2551     ARCHERO STORAGE DISCOVERY (Android)                      \u2551");
+console.log("\u2551     Capturing first 15 seconds of storage operations         \u2551");
 console.log("\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D");
-var DISCOVERY_DURATION_MS = 1e4;
-var LOG_FILE_CONTENTS = true;
-var MAX_CONTENT_PREVIEW = 256;
-var INTERESTING_PATH_PATTERNS = [
-  "/data/",
-  "shared_prefs",
-  ".json",
-  ".dat",
-  ".xml",
-  ".bin",
-  ".save",
-  "PlayerPrefs",
-  "archero",
-  "habby"
-];
-var IGNORE_PATH_PATTERNS = [
-  "/proc/",
-  "/sys/",
-  "/dev/",
-  "libfrida",
-  "frida-agent",
-  ".so",
-  ".dex",
-  ".odex",
-  ".vdex",
-  ".art"
-];
-var fileOperations = [];
+var DISCOVERY_DURATION_MS = 15e3;
+var LOG_CONTENT_PREVIEW = true;
+var MAX_PREVIEW_LEN = 128;
+var INTERESTING_PATHS = ["/data/", "shared_prefs", ".json", ".dat", ".xml", ".bin", ".save", "archero", "habby"];
+var IGNORE_PATHS = ["/proc/", "/sys/", "/dev/", "libfrida", ".so", ".dex", ".odex"];
+var operations = [];
 var openFds = /* @__PURE__ */ new Map();
-var pathStats = /* @__PURE__ */ new Map();
+var assetBundles = [];
+var prefsKeys = [];
+var saveDataEvents = [];
 var discoveryStartTime = 0;
 function elapsed() {
   return (Date.now() - discoveryStartTime) / 1e3;
 }
 function ts() {
   return `[${elapsed().toFixed(2)}s]`;
-}
-function isInterestingPath(path) {
-  if (!path)
-    return false;
-  for (const pattern of IGNORE_PATH_PATTERNS) {
-    if (path.includes(pattern))
-      return false;
-  }
-  for (const pattern of INTERESTING_PATH_PATTERNS) {
-    if (path.toLowerCase().includes(pattern.toLowerCase()))
-      return true;
-  }
-  return false;
-}
-function getOpenFlags(flags) {
-  const flagNames = [];
-  if ((flags & 0) === 0)
-    flagNames.push("O_RDONLY");
-  if (flags & 1)
-    flagNames.push("O_WRONLY");
-  if (flags & 2)
-    flagNames.push("O_RDWR");
-  if (flags & 64)
-    flagNames.push("O_CREAT");
-  if (flags & 512)
-    flagNames.push("O_TRUNC");
-  if (flags & 1024)
-    flagNames.push("O_APPEND");
-  return flagNames.join("|") || "0";
-}
-function updatePathStats(path, op) {
-  if (!pathStats.has(path)) {
-    pathStats.set(path, { reads: 0, writes: 0, opens: 0 });
-  }
-  const stats = pathStats.get(path);
-  if (op === "read")
-    stats.reads++;
-  if (op === "write")
-    stats.writes++;
-  if (op === "open")
-    stats.opens++;
 }
 function safeString(val) {
   if (val === null || val === void 0)
@@ -3413,187 +3352,169 @@ function safeString(val) {
     return "<error>";
   }
 }
-function hookNativeFileIO() {
+function isInteresting(path) {
+  if (!path)
+    return false;
+  for (const p of IGNORE_PATHS)
+    if (path.includes(p))
+      return false;
+  for (const p of INTERESTING_PATHS)
+    if (path.toLowerCase().includes(p.toLowerCase()))
+      return true;
+  return false;
+}
+function preview(str, len = MAX_PREVIEW_LEN) {
+  return str.length > len ? str.substring(0, len) + "..." : str;
+}
+function log(category, op, target, detail) {
+  const icon = {
+    file: "\u{1F4C2}",
+    prefs: "\u{1F511}",
+    asset: "\u{1F4E6}",
+    json: "\u{1F4CB}",
+    binary: "\u{1F4BE}",
+    stream: "\u{1F4D6}",
+    save: "\u{1F4BF}"
+  }[category] || "\u{1F4C1}";
+  console.log(`${ts()} [${category.toUpperCase().padEnd(6)}] ${icon} ${op}: ${preview(target, 50)}`);
+  if (detail)
+    console.log(`${ts()}   \u2514\u2500 ${preview(detail, 80)}`);
+  operations.push({
+    t: elapsed(),
+    category,
+    op,
+    target: target.substring(0, 200),
+    detail: detail?.substring(0, 100)
+  });
+}
+function hookNativeIO() {
   console.log("[NATIVE] Setting up file I/O hooks...");
-  const openPtr = Module.findExportByName(null, "open");
-  if (openPtr) {
-    Interceptor.attach(openPtr, {
-      onEnter(args) {
-        this.path = args[0].readUtf8String();
-        this.flags = args[1].toInt32();
-      },
-      onLeave(retval) {
-        const fd = retval.toInt32();
-        if (fd >= 0 && this.path && isInterestingPath(this.path)) {
-          openFds.set(fd, this.path);
-          updatePathStats(this.path, "open");
-          const flagStr = getOpenFlags(this.flags);
-          console.log(`${ts()} [OPEN] fd=${fd} flags=${flagStr}`);
-          console.log(`${ts()}   \u{1F4C2} ${this.path}`);
-          fileOperations.push({
-            t: elapsed(),
-            op: "open",
-            path: this.path,
-            flags: flagStr
-          });
+  try {
+    const openPtr = Module.findExportByName(null, "open");
+    if (openPtr) {
+      Interceptor.attach(openPtr, {
+        onEnter(args) {
+          try {
+            this.path = args[0].readUtf8String();
+          } catch (e) {
+            this.path = null;
+          }
+        },
+        onLeave(retval) {
+          try {
+            const fd = retval.toInt32();
+            if (fd >= 0 && this.path && isInteresting(this.path)) {
+              openFds.set(fd, this.path);
+              log("file", "open", this.path);
+            }
+          } catch (e) {
+          }
         }
-      }
-    });
-    console.log("   \u2713 open() hooked");
-  }
-  const openatPtr = Module.findExportByName(null, "openat");
-  if (openatPtr) {
-    Interceptor.attach(openatPtr, {
-      onEnter(args) {
-        this.path = args[1].readUtf8String();
-        this.flags = args[2].toInt32();
-      },
-      onLeave(retval) {
-        const fd = retval.toInt32();
-        if (fd >= 0 && this.path && isInterestingPath(this.path)) {
-          openFds.set(fd, this.path);
-          updatePathStats(this.path, "open");
-          const flagStr = getOpenFlags(this.flags);
-          console.log(`${ts()} [OPENAT] fd=${fd} flags=${flagStr}`);
-          console.log(`${ts()}   \u{1F4C2} ${this.path}`);
-          fileOperations.push({
-            t: elapsed(),
-            op: "open",
-            path: this.path,
-            flags: flagStr
-          });
+      });
+      console.log("   \u2713 open()");
+    }
+    const openatPtr = Module.findExportByName(null, "openat");
+    if (openatPtr) {
+      Interceptor.attach(openatPtr, {
+        onEnter(args) {
+          try {
+            this.path = args[1].readUtf8String();
+          } catch (e) {
+            this.path = null;
+          }
+        },
+        onLeave(retval) {
+          try {
+            const fd = retval.toInt32();
+            if (fd >= 0 && this.path && isInteresting(this.path)) {
+              openFds.set(fd, this.path);
+              log("file", "openat", this.path);
+            }
+          } catch (e) {
+          }
         }
-      }
-    });
-    console.log("   \u2713 openat() hooked");
-  }
-  const readPtr = Module.findExportByName(null, "read");
-  if (readPtr) {
-    Interceptor.attach(readPtr, {
-      onEnter(args) {
-        this.fd = args[0].toInt32();
-        this.buf = args[1];
-        this.count = args[2].toInt32();
-      },
-      onLeave(retval) {
-        const bytesRead = retval.toInt32();
-        const path = openFds.get(this.fd);
-        if (bytesRead > 0 && path) {
-          updatePathStats(path, "read");
-          let preview = "";
-          if (LOG_FILE_CONTENTS && bytesRead > 0) {
-            try {
-              const previewLen = Math.min(bytesRead, MAX_CONTENT_PREVIEW);
-              const bytes = this.buf.readByteArray(previewLen);
-              if (bytes) {
-                const arr = new Uint8Array(bytes);
-                let isPrintable = true;
-                for (let i = 0; i < Math.min(arr.length, 32); i++) {
-                  if (arr[i] < 32 && arr[i] !== 10 && arr[i] !== 13 && arr[i] !== 9) {
-                    isPrintable = false;
-                    break;
-                  }
-                }
-                if (isPrintable) {
-                  preview = new TextDecoder().decode(arr).substring(0, 100);
-                } else {
-                  preview = Array.from(arr.slice(0, 32)).map((b) => b.toString(16).padStart(2, "0")).join(" ");
+      });
+      console.log("   \u2713 openat()");
+    }
+    const readPtr = Module.findExportByName(null, "read");
+    if (readPtr) {
+      Interceptor.attach(readPtr, {
+        onEnter(args) {
+          try {
+            this.fd = args[0].toInt32();
+            this.buf = args[1];
+          } catch (e) {
+            this.fd = -1;
+          }
+        },
+        onLeave(retval) {
+          try {
+            const bytes = retval.toInt32();
+            const path = openFds.get(this.fd);
+            if (bytes > 0 && path) {
+              let preview2 = "";
+              if (LOG_CONTENT_PREVIEW) {
+                try {
+                  const arr = this.buf.readByteArray(Math.min(bytes, 32));
+                  if (arr)
+                    preview2 = Array.from(new Uint8Array(arr)).map((b) => b.toString(16).padStart(2, "0")).join(" ");
+                } catch (e) {
                 }
               }
-            } catch (e) {
+              log("file", `read(${bytes}B)`, path, preview2);
             }
+          } catch (e) {
           }
-          console.log(`${ts()} [READ] fd=${this.fd} ${bytesRead} bytes`);
-          console.log(`${ts()}   \u{1F4D6} ${path}`);
-          if (preview) {
-            console.log(`${ts()}   \u{1F4C4} ${preview}${bytesRead > MAX_CONTENT_PREVIEW ? "..." : ""}`);
-          }
-          fileOperations.push({
-            t: elapsed(),
-            op: "read",
-            path,
-            size: bytesRead,
-            preview: preview.substring(0, 50)
-          });
         }
-      }
-    });
-    console.log("   \u2713 read() hooked");
-  }
-  const writePtr = Module.findExportByName(null, "write");
-  if (writePtr) {
-    Interceptor.attach(writePtr, {
-      onEnter(args) {
-        this.fd = args[0].toInt32();
-        this.buf = args[1];
-        this.count = args[2].toInt32();
-      },
-      onLeave(retval) {
-        const bytesWritten = retval.toInt32();
-        const path = openFds.get(this.fd);
-        if (bytesWritten > 0 && path) {
-          updatePathStats(path, "write");
-          let preview = "";
-          if (LOG_FILE_CONTENTS && this.count > 0) {
-            try {
-              const previewLen = Math.min(this.count, MAX_CONTENT_PREVIEW);
-              const bytes = this.buf.readByteArray(previewLen);
-              if (bytes) {
-                const arr = new Uint8Array(bytes);
-                let isPrintable = true;
-                for (let i = 0; i < Math.min(arr.length, 32); i++) {
-                  if (arr[i] < 32 && arr[i] !== 10 && arr[i] !== 13 && arr[i] !== 9) {
-                    isPrintable = false;
-                    break;
-                  }
-                }
-                if (isPrintable) {
-                  preview = new TextDecoder().decode(arr).substring(0, 100);
-                } else {
-                  preview = Array.from(arr.slice(0, 32)).map((b) => b.toString(16).padStart(2, "0")).join(" ");
-                }
-              }
-            } catch (e) {
+      });
+      console.log("   \u2713 read()");
+    }
+    const writePtr = Module.findExportByName(null, "write");
+    if (writePtr) {
+      Interceptor.attach(writePtr, {
+        onEnter(args) {
+          try {
+            this.fd = args[0].toInt32();
+            this.buf = args[1];
+            this.count = args[2].toInt32();
+          } catch (e) {
+            this.fd = -1;
+          }
+        },
+        onLeave(retval) {
+          try {
+            const bytes = retval.toInt32();
+            const path = openFds.get(this.fd);
+            if (bytes > 0 && path) {
+              log("file", `write(${bytes}B)`, path);
             }
+          } catch (e) {
           }
-          console.log(`${ts()} [WRITE] fd=${this.fd} ${bytesWritten} bytes`);
-          console.log(`${ts()}   \u{1F4DD} ${path}`);
-          if (preview) {
-            console.log(`${ts()}   \u{1F4C4} ${preview}${this.count > MAX_CONTENT_PREVIEW ? "..." : ""}`);
+        }
+      });
+      console.log("   \u2713 write()");
+    }
+    const closePtr = Module.findExportByName(null, "close");
+    if (closePtr) {
+      Interceptor.attach(closePtr, {
+        onEnter(args) {
+          try {
+            this.fd = args[0].toInt32();
+          } catch (e) {
+            this.fd = -1;
           }
-          fileOperations.push({
-            t: elapsed(),
-            op: "write",
-            path,
-            size: bytesWritten,
-            preview: preview.substring(0, 50)
-          });
+        },
+        onLeave() {
+          try {
+            openFds.delete(this.fd);
+          } catch (e) {
+          }
         }
-      }
-    });
-    console.log("   \u2713 write() hooked");
-  }
-  const closePtr = Module.findExportByName(null, "close");
-  if (closePtr) {
-    Interceptor.attach(closePtr, {
-      onEnter(args) {
-        this.fd = args[0].toInt32();
-      },
-      onLeave(retval) {
-        const path = openFds.get(this.fd);
-        if (path) {
-          console.log(`${ts()} [CLOSE] fd=${this.fd}`);
-          console.log(`${ts()}   \u{1F4C1} ${path}`);
-          fileOperations.push({
-            t: elapsed(),
-            op: "close",
-            path
-          });
-          openFds.delete(this.fd);
-        }
-      }
-    });
-    console.log("   \u2713 close() hooked");
+      });
+      console.log("   \u2713 close()");
+    }
+  } catch (e) {
+    console.log(`   \u2717 Native hooks failed: ${e}`);
   }
 }
 function hookIl2Cpp() {
@@ -3602,15 +3523,18 @@ function hookIl2Cpp() {
     discoveryStartTime = Date.now();
     console.log(`${ts()} [IL2CPP] Runtime ready, installing hooks...`);
     hookSystemIO();
-    hookPlayerPrefs();
-    hookPlayerPrefsEncrypt();
     hookUnityPaths();
+    hookLocalSave();
+    hookPlayerPrefs();
+    hookSharedPreferences();
+    hookAssetLoading();
+    hookJsonSerialization();
+    hookBinarySerialization();
+    hookStreams();
     console.log(`
 ${ts()} [READY] All hooks installed. Capturing for ${DISCOVERY_DURATION_MS / 1e3}s...`);
     console.log("\u2550".repeat(66));
-    setTimeout(() => {
-      printSummary();
-    }, DISCOVERY_DURATION_MS);
+    setTimeout(() => printSummary(), DISCOVERY_DURATION_MS);
   });
 }
 function hookSystemIO() {
@@ -3620,21 +3544,14 @@ function hookSystemIO() {
     try {
       const fileClass = mscorlib.class("System.IO.File");
       const fileMethods = ["OpenRead", "ReadAllText", "WriteAllBytes", "Create", "Delete", "Exists", "Copy", "Move"];
-      for (const methodName of fileMethods) {
+      for (const m of fileMethods) {
         try {
-          fileClass.method(methodName).implementation = function(...args) {
+          fileClass.method(m).implementation = function(...args) {
             const path = args.length > 0 ? safeString(args[0]) : "";
-            console.log(`${ts()} [FILE] System.IO.File.${methodName}`);
-            console.log(`${ts()}   \u{1F4C2} ${path}`);
-            fileOperations.push({
-              t: elapsed(),
-              op: "file_api",
-              path,
-              method: `File.${methodName}`
-            });
-            return this.method(methodName).invoke(...args);
+            log("file", `File.${m}`, path);
+            return this.method(m).invoke(...args);
           };
-          console.log(`${ts()}   \u2713 File.${methodName}`);
+          console.log(`${ts()}   \u2713 File.${m}`);
         } catch (e) {
         }
       }
@@ -3642,161 +3559,20 @@ function hookSystemIO() {
     }
     try {
       const fileStreamClass = mscorlib.class("System.IO.FileStream");
-      try {
-        fileStreamClass.method(".ctor").implementation = function(...args) {
-          const path = args.length > 0 ? safeString(args[0]) : "";
-          console.log(`${ts()} [STREAM] new FileStream`);
-          console.log(`${ts()}   \u{1F4C2} ${path}`);
-          fileOperations.push({
-            t: elapsed(),
-            op: "file_api",
-            path,
-            method: "FileStream.ctor"
-          });
-          return this.method(".ctor").invoke(...args);
-        };
-        console.log(`${ts()}   \u2713 FileStream.ctor`);
-      } catch (e) {
-      }
-    } catch (e) {
-    }
-  } catch (e) {
-    console.log(`${ts()}   \u2717 System.IO hooks failed: ${e}`);
-  }
-}
-function hookPlayerPrefs() {
-  console.log(`${ts()} [HOOK] UnityEngine.PlayerPrefs...`);
-  try {
-    const unityAsm = Il2Cpp.domain.assembly("UnityEngine.CoreModule").image;
-    const playerPrefs = unityAsm.class("UnityEngine.PlayerPrefs");
-    const getMethods = ["GetString", "GetInt", "GetFloat"];
-    for (const methodName of getMethods) {
-      try {
-        playerPrefs.method(methodName).implementation = function(...args) {
-          const key = args.length > 0 ? safeString(args[0]) : "";
-          const result = this.method(methodName).invoke(...args);
-          const value = safeString(result);
-          console.log(`${ts()} [PREFS:GET] PlayerPrefs.${methodName}`);
-          console.log(`${ts()}   \u{1F511} ${key} = ${value.substring(0, 50)}${value.length > 50 ? "..." : ""}`);
-          fileOperations.push({
-            t: elapsed(),
-            op: "prefs_get",
-            path: `PlayerPrefs.${key}`,
-            method: methodName,
-            value: value.substring(0, 100)
-          });
-          return result;
-        };
-        console.log(`${ts()}   \u2713 PlayerPrefs.${methodName}`);
-      } catch (e) {
-      }
-    }
-    const setMethods = ["SetString", "SetInt", "SetFloat"];
-    for (const methodName of setMethods) {
-      try {
-        playerPrefs.method(methodName).implementation = function(...args) {
-          const key = args.length > 0 ? safeString(args[0]) : "";
-          const value = args.length > 1 ? safeString(args[1]) : "";
-          console.log(`${ts()} [PREFS:SET] PlayerPrefs.${methodName}`);
-          console.log(`${ts()}   \u{1F511} ${key} = ${value.substring(0, 50)}${value.length > 50 ? "..." : ""}`);
-          fileOperations.push({
-            t: elapsed(),
-            op: "prefs_set",
-            path: `PlayerPrefs.${key}`,
-            method: methodName,
-            value: value.substring(0, 100)
-          });
-          return this.method(methodName).invoke(...args);
-        };
-        console.log(`${ts()}   \u2713 PlayerPrefs.${methodName}`);
-      } catch (e) {
-      }
-    }
-    try {
-      playerPrefs.method("Save").implementation = function() {
-        console.log(`${ts()} [PREFS:SAVE] PlayerPrefs.Save()`);
-        fileOperations.push({
-          t: elapsed(),
-          op: "prefs_set",
-          path: "PlayerPrefs.Save",
-          method: "Save"
-        });
-        return this.method("Save").invoke();
+      fileStreamClass.method(".ctor").implementation = function(...args) {
+        const path = args.length > 0 ? safeString(args[0]) : "";
+        log("file", "FileStream.ctor", path);
+        return this.method(".ctor").invoke(...args);
       };
-      console.log(`${ts()}   \u2713 PlayerPrefs.Save`);
+      console.log(`${ts()}   \u2713 FileStream.ctor`);
     } catch (e) {
     }
   } catch (e) {
-    console.log(`${ts()}   \u2717 PlayerPrefs hooks failed: ${e}`);
-  }
-}
-function hookPlayerPrefsEncrypt() {
-  console.log(`${ts()} [HOOK] PlayerPrefsEncrypt...`);
-  try {
-    const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
-    const prefsEncrypt = asm.class("PlayerPrefsEncrypt");
-    const getMethods = ["GetString", "GetInt", "GetBool", "GetLong", "GetFloat"];
-    for (const methodName of getMethods) {
-      try {
-        prefsEncrypt.method(methodName).implementation = function(...args) {
-          const key = args.length > 0 ? safeString(args[0]) : "";
-          const result = this.method(methodName).invoke(...args);
-          const value = safeString(result);
-          console.log(`${ts()} [PREFS:GET:ENC] PlayerPrefsEncrypt.${methodName}`);
-          console.log(`${ts()}   \u{1F510} ${key} = ${value.substring(0, 50)}${value.length > 50 ? "..." : ""}`);
-          fileOperations.push({
-            t: elapsed(),
-            op: "prefs_get",
-            path: `PlayerPrefsEncrypt.${key}`,
-            method: methodName,
-            value: value.substring(0, 100)
-          });
-          return result;
-        };
-        console.log(`${ts()}   \u2713 PlayerPrefsEncrypt.${methodName}`);
-      } catch (e) {
-      }
-    }
-    const setMethods = ["SetString", "SetInt", "SetBool", "SetLong", "SetFloat"];
-    for (const methodName of setMethods) {
-      try {
-        prefsEncrypt.method(methodName).implementation = function(...args) {
-          const key = args.length > 0 ? safeString(args[0]) : "";
-          const value = args.length > 1 ? safeString(args[1]) : "";
-          console.log(`${ts()} [PREFS:SET:ENC] PlayerPrefsEncrypt.${methodName}`);
-          console.log(`${ts()}   \u{1F510} ${key} = ${value.substring(0, 50)}${value.length > 50 ? "..." : ""}`);
-          fileOperations.push({
-            t: elapsed(),
-            op: "prefs_set",
-            path: `PlayerPrefsEncrypt.${key}`,
-            method: methodName,
-            value: value.substring(0, 100)
-          });
-          return this.method(methodName).invoke(...args);
-        };
-        console.log(`${ts()}   \u2713 PlayerPrefsEncrypt.${methodName}`);
-      } catch (e) {
-      }
-    }
-    try {
-      prefsEncrypt.method("Encrypt").implementation = function(...args) {
-        const input = args.length > 0 ? safeString(args[0]) : "";
-        const result = this.method("Encrypt").invoke(...args);
-        const output = safeString(result);
-        console.log(`${ts()} [CRYPTO] PlayerPrefsEncrypt.Encrypt`);
-        console.log(`${ts()}   IN:  ${input.substring(0, 40)}${input.length > 40 ? "..." : ""}`);
-        console.log(`${ts()}   OUT: ${output.substring(0, 40)}${output.length > 40 ? "..." : ""}`);
-        return result;
-      };
-      console.log(`${ts()}   \u2713 PlayerPrefsEncrypt.Encrypt`);
-    } catch (e) {
-    }
-  } catch (e) {
-    console.log(`${ts()}   \u2717 PlayerPrefsEncrypt hooks failed: ${e}`);
+    console.log(`${ts()}   \u2717 System.IO hooks failed`);
   }
 }
 function hookUnityPaths() {
-  console.log(`${ts()} [HOOK] Unity Application paths...`);
+  console.log(`${ts()} [HOOK] Unity paths...`);
   try {
     const unityAsm = Il2Cpp.domain.assembly("UnityEngine.CoreModule").image;
     const application = unityAsm.class("UnityEngine.Application");
@@ -3804,102 +3580,404 @@ function hookUnityPaths() {
       application.method("get_persistentDataPath").implementation = function() {
         const result = this.method("get_persistentDataPath").invoke();
         const path = safeString(result);
-        console.log(`${ts()} [PATH] Application.persistentDataPath = ${path}`);
+        log("file", "persistentDataPath", path);
         return result;
       };
-      console.log(`${ts()}   \u2713 Application.get_persistentDataPath`);
+      console.log(`${ts()}   \u2713 Application.persistentDataPath`);
     } catch (e) {
     }
     try {
       application.method("get_dataPath").implementation = function() {
         const result = this.method("get_dataPath").invoke();
         const path = safeString(result);
-        console.log(`${ts()} [PATH] Application.dataPath = ${path}`);
+        log("file", "dataPath", path);
         return result;
       };
-      console.log(`${ts()}   \u2713 Application.get_dataPath`);
+      console.log(`${ts()}   \u2713 Application.dataPath`);
     } catch (e) {
     }
     try {
       application.method("get_temporaryCachePath").implementation = function() {
         const result = this.method("get_temporaryCachePath").invoke();
         const path = safeString(result);
-        console.log(`${ts()} [PATH] Application.temporaryCachePath = ${path}`);
+        log("file", "temporaryCachePath", path);
         return result;
       };
-      console.log(`${ts()}   \u2713 Application.get_temporaryCachePath`);
+      console.log(`${ts()}   \u2713 Application.temporaryCachePath`);
     } catch (e) {
     }
   } catch (e) {
-    console.log(`${ts()}   \u2717 Unity path hooks failed: ${e}`);
+    console.log(`${ts()}   \u2717 Unity path hooks failed`);
+  }
+}
+function hookLocalSave() {
+  console.log(`${ts()} [HOOK] LocalSave...`);
+  try {
+    const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
+    try {
+      const localSave = asm.class("LocalSave");
+      localSave.method("InitSaveData").implementation = function() {
+        log("save", "InitSaveData", "LocalSave");
+        saveDataEvents.push("InitSaveData");
+        return this.method("InitSaveData").invoke();
+      };
+      console.log(`${ts()}   \u2713 LocalSave.InitSaveData`);
+    } catch (e) {
+    }
+    try {
+      const localSave = asm.class("LocalSave");
+      localSave.method("SaveDataRefresh").implementation = function() {
+        log("save", "SaveDataRefresh", "LocalSave");
+        saveDataEvents.push("SaveDataRefresh");
+        return this.method("SaveDataRefresh").invoke();
+      };
+      console.log(`${ts()}   \u2713 LocalSave.SaveDataRefresh`);
+    } catch (e) {
+    }
+    try {
+      const localSaveBase = asm.class("LocalSaveBase");
+      localSaveBase.method("SaveData").implementation = function() {
+        log("save", "SaveData", "LocalSaveBase");
+        saveDataEvents.push("LocalSaveBase.SaveData");
+        return this.method("SaveData").invoke();
+      };
+      console.log(`${ts()}   \u2713 LocalSaveBase.SaveData`);
+    } catch (e) {
+    }
+    try {
+      const saveData = asm.class("LocalSave.SaveData");
+      saveData.method("serializeObject").implementation = function() {
+        log("save", "serializeObject", "LocalSave.SaveData");
+        return this.method("serializeObject").invoke();
+      };
+      console.log(`${ts()}   \u2713 LocalSave.SaveData.serializeObject`);
+    } catch (e) {
+    }
+  } catch (e) {
+    console.log(`${ts()}   \u2717 LocalSave hooks failed: ${e}`);
+  }
+}
+function hookPlayerPrefs() {
+  console.log(`${ts()} [HOOK] PlayerPrefs...`);
+  try {
+    const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
+    const prefDataBase = asm.class("PlayerPrefsMgr.PrefDataBase");
+    try {
+      prefDataBase.method("flush").implementation = function() {
+        const name = safeString(this.field("name").value);
+        log("prefs", "flush", `PrefDataBase.${name}`);
+        return this.method("flush").invoke();
+      };
+      console.log(`${ts()}   \u2713 PrefDataBase.flush`);
+    } catch (e) {
+    }
+    try {
+      prefDataBase.method("Delete").implementation = function() {
+        const name = safeString(this.field("name").value);
+        log("prefs", "Delete", `PrefDataBase.${name}`);
+        return this.method("Delete").invoke();
+      };
+      console.log(`${ts()}   \u2713 PrefDataBase.Delete`);
+    } catch (e) {
+    }
+  } catch (e) {
+  }
+  try {
+    const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
+    const prefsEncrypt = asm.class("PlayerPrefsEncrypt");
+    const getMethods = ["GetString", "GetInt", "GetBool", "GetLong", "GetFloat"];
+    for (const m of getMethods) {
+      try {
+        prefsEncrypt.method(m).implementation = function(...args) {
+          const key = safeString(args[0]);
+          const result = this.method(m).invoke(...args);
+          const value = safeString(result);
+          log("prefs", `${m}`, key, value);
+          if (!prefsKeys.includes(key))
+            prefsKeys.push(key);
+          return result;
+        };
+        console.log(`${ts()}   \u2713 PlayerPrefsEncrypt.${m}`);
+      } catch (e) {
+      }
+    }
+    const setMethods = ["SetString", "SetInt", "SetBool", "SetLong", "SetFloat"];
+    for (const m of setMethods) {
+      try {
+        prefsEncrypt.method(m).implementation = function(...args) {
+          const key = safeString(args[0]);
+          const value = args.length > 1 ? safeString(args[1]) : "";
+          log("prefs", `${m}`, key, value);
+          if (!prefsKeys.includes(key))
+            prefsKeys.push(key);
+          return this.method(m).invoke(...args);
+        };
+        console.log(`${ts()}   \u2713 PlayerPrefsEncrypt.${m}`);
+      } catch (e) {
+      }
+    }
+  } catch (e) {
+  }
+}
+function hookSharedPreferences() {
+  console.log(`${ts()} [HOOK] SharedPreferences...`);
+  try {
+    const unityServices = Il2Cpp.domain.assembly("Unity.Services.Core").image;
+    const androidUtils = unityServices.class("Unity.Services.Core.Device.AndroidUtils");
+    try {
+      androidUtils.method("SharedPreferencesGetString").implementation = function(...args) {
+        const key = safeString(args[1]);
+        const result = this.method("SharedPreferencesGetString").invoke(...args);
+        const value = safeString(result);
+        log("prefs", "SharedPrefs.Get", key, value);
+        return result;
+      };
+      console.log(`${ts()}   \u2713 AndroidUtils.SharedPreferencesGetString`);
+    } catch (e) {
+    }
+    try {
+      androidUtils.method("SharedPreferencesPutString").implementation = function(...args) {
+        const key = safeString(args[1]);
+        const value = safeString(args[2]);
+        log("prefs", "SharedPrefs.Put", key, value);
+        return this.method("SharedPreferencesPutString").invoke(...args);
+      };
+      console.log(`${ts()}   \u2713 AndroidUtils.SharedPreferencesPutString`);
+    } catch (e) {
+    }
+  } catch (e) {
+    console.log(`${ts()}   \u2717 SharedPreferences not found`);
+  }
+}
+function hookAssetLoading() {
+  console.log(`${ts()} [HOOK] Asset loading...`);
+  try {
+    const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
+    try {
+      const resourceMgr = asm.class("ResourceManager");
+      resourceMgr.method("GetAssetBundle").implementation = function(...args) {
+        const name = safeString(args[0]);
+        log("asset", "GetAssetBundle", name);
+        if (!assetBundles.includes(name))
+          assetBundles.push(name);
+        return this.method("GetAssetBundle").invoke(...args);
+      };
+      console.log(`${ts()}   \u2713 ResourceManager.GetAssetBundle`);
+    } catch (e) {
+    }
+    try {
+      const addressable = asm.class("Dxx.Addressable.AddressableManager");
+      addressable.methods.forEach((method) => {
+        if (method.name.includes("LoadAsset") || method.name.includes("LoadScene")) {
+          try {
+            addressable.method(method.name).implementation = function(...args) {
+              const asset = args.length > 0 ? safeString(args[0]) : "";
+              log("asset", method.name, asset);
+              return this.method(method.name).invoke(...args);
+            };
+          } catch (e) {
+          }
+        }
+      });
+      console.log(`${ts()}   \u2713 AddressableManager`);
+    } catch (e) {
+    }
+  } catch (e) {
+    console.log(`${ts()}   \u2717 Asset loading hooks failed`);
+  }
+}
+function hookJsonSerialization() {
+  console.log(`${ts()} [HOOK] JSON serialization...`);
+  try {
+    const newtonsoftAsm = Il2Cpp.domain.assembly("Newtonsoft.Json").image;
+    const jsonConvert = newtonsoftAsm.class("Newtonsoft.Json.JsonConvert");
+    try {
+      jsonConvert.method("SerializeObject").implementation = function(...args) {
+        const result = this.method("SerializeObject").invoke(...args);
+        const json = safeString(result);
+        log("json", "SerializeObject", preview(json, 60));
+        return result;
+      };
+      console.log(`${ts()}   \u2713 JsonConvert.SerializeObject`);
+    } catch (e) {
+    }
+    try {
+      jsonConvert.method("DeserializeObject").implementation = function(...args) {
+        const json = safeString(args[0]);
+        log("json", "DeserializeObject", preview(json, 60));
+        return this.method("DeserializeObject").invoke(...args);
+      };
+      console.log(`${ts()}   \u2713 JsonConvert.DeserializeObject`);
+    } catch (e) {
+    }
+  } catch (e) {
+  }
+  try {
+    const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
+    const simpleJson = asm.class("SimpleJson.SimpleJson");
+    try {
+      simpleJson.method("SerializeObject").implementation = function(...args) {
+        const result = this.method("SerializeObject").invoke(...args);
+        const json = safeString(result);
+        log("json", "SimpleJson.Serialize", preview(json, 60));
+        return result;
+      };
+      console.log(`${ts()}   \u2713 SimpleJson.SerializeObject`);
+    } catch (e) {
+    }
+    try {
+      simpleJson.method("DeserializeObject").implementation = function(...args) {
+        const json = safeString(args[0]);
+        log("json", "SimpleJson.Deserialize", preview(json, 60));
+        return this.method("DeserializeObject").invoke(...args);
+      };
+      console.log(`${ts()}   \u2713 SimpleJson.DeserializeObject`);
+    } catch (e) {
+    }
+  } catch (e) {
+  }
+}
+function hookBinarySerialization() {
+  console.log(`${ts()} [HOOK] Binary serialization...`);
+  try {
+    const mscorlib = Il2Cpp.domain.assembly("mscorlib").image;
+    const binaryFormatter = mscorlib.class("System.Runtime.Serialization.Formatters.Binary.BinaryFormatter");
+    try {
+      binaryFormatter.method("Serialize").implementation = function(...args) {
+        log("binary", "BinaryFormatter.Serialize", "stream");
+        return this.method("Serialize").invoke(...args);
+      };
+      console.log(`${ts()}   \u2713 BinaryFormatter.Serialize`);
+    } catch (e) {
+    }
+    try {
+      binaryFormatter.method("Deserialize").implementation = function(...args) {
+        const result = this.method("Deserialize").invoke(...args);
+        let typeName = "unknown";
+        try {
+          const r = result;
+          if (r && r.class)
+            typeName = r.class.name || "unknown";
+        } catch (e) {
+        }
+        log("binary", "BinaryFormatter.Deserialize", typeName);
+        return result;
+      };
+      console.log(`${ts()}   \u2713 BinaryFormatter.Deserialize`);
+    } catch (e) {
+    }
+  } catch (e) {
+    console.log(`${ts()}   \u2717 BinaryFormatter hooks failed`);
+  }
+}
+function hookStreams() {
+  console.log(`${ts()} [HOOK] Streams...`);
+  try {
+    const mscorlib = Il2Cpp.domain.assembly("mscorlib").image;
+    try {
+      const streamReader = mscorlib.class("System.IO.StreamReader");
+      try {
+        streamReader.method("ReadToEnd").implementation = function() {
+          const result = this.method("ReadToEnd").invoke();
+          const content = safeString(result);
+          log("stream", "StreamReader.ReadToEnd", preview(content, 50));
+          return result;
+        };
+        console.log(`${ts()}   \u2713 StreamReader.ReadToEnd`);
+      } catch (e) {
+      }
+      try {
+        streamReader.method("ReadLine").implementation = function() {
+          const result = this.method("ReadLine").invoke();
+          const line = safeString(result);
+          if (line !== "<null>")
+            log("stream", "StreamReader.ReadLine", preview(line, 50));
+          return result;
+        };
+        console.log(`${ts()}   \u2713 StreamReader.ReadLine`);
+      } catch (e) {
+      }
+    } catch (e) {
+    }
+    try {
+      const streamWriter = mscorlib.class("System.IO.StreamWriter");
+      try {
+        streamWriter.method("Write").implementation = function(...args) {
+          const content = safeString(args[0]);
+          log("stream", "StreamWriter.Write", preview(content, 50));
+          return this.method("Write").invoke(...args);
+        };
+        console.log(`${ts()}   \u2713 StreamWriter.Write`);
+      } catch (e) {
+      }
+      try {
+        streamWriter.method("WriteLine").implementation = function(...args) {
+          const content = safeString(args[0]);
+          log("stream", "StreamWriter.WriteLine", preview(content, 50));
+          return this.method("WriteLine").invoke(...args);
+        };
+        console.log(`${ts()}   \u2713 StreamWriter.WriteLine`);
+      } catch (e) {
+      }
+    } catch (e) {
+    }
+  } catch (e) {
+    console.log(`${ts()}   \u2717 Stream hooks failed`);
   }
 }
 function printSummary() {
   const totalTime = elapsed();
   console.log("\n");
   console.log("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557");
-  console.log("\u2551               FILE I/O DISCOVERY SUMMARY                     \u2551");
+  console.log("\u2551               STORAGE DISCOVERY SUMMARY                      \u2551");
   console.log("\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D");
   console.log(`
 \u{1F4CA} Session Statistics:`);
   console.log(`   Duration: ${totalTime.toFixed(1)}s`);
-  console.log(`   Total operations: ${fileOperations.length}`);
-  console.log(`   Unique paths: ${pathStats.size}`);
-  const opCounts = {
-    open: fileOperations.filter((o) => o.op === "open").length,
-    read: fileOperations.filter((o) => o.op === "read").length,
-    write: fileOperations.filter((o) => o.op === "write").length,
-    close: fileOperations.filter((o) => o.op === "close").length,
-    prefs_get: fileOperations.filter((o) => o.op === "prefs_get").length,
-    prefs_set: fileOperations.filter((o) => o.op === "prefs_set").length,
-    file_api: fileOperations.filter((o) => o.op === "file_api").length
-  };
+  console.log(`   Total operations: ${operations.length}`);
+  const categories = ["file", "prefs", "asset", "json", "binary", "stream", "save"];
   console.log(`
-\u{1F4C8} Operation Breakdown:`);
-  console.log(`   Opens:     ${opCounts.open}`);
-  console.log(`   Reads:     ${opCounts.read}`);
-  console.log(`   Writes:    ${opCounts.write}`);
-  console.log(`   Closes:    ${opCounts.close}`);
-  console.log(`   Prefs Get: ${opCounts.prefs_get}`);
-  console.log(`   Prefs Set: ${opCounts.prefs_set}`);
-  console.log(`   File API:  ${opCounts.file_api}`);
+\u{1F4C8} Operations by Category:`);
+  for (const cat of categories) {
+    const count = operations.filter((o) => o.category === cat).length;
+    if (count > 0)
+      console.log(`   ${cat.padEnd(8)}: ${count}`);
+  }
   console.log(`
-\u{1F4C1} Files Accessed (by frequency):`);
+\u{1F4BF} Save Data Events (${saveDataEvents.length}):`);
+  saveDataEvents.slice(0, 10).forEach((e) => console.log(`   - ${e}`));
+  console.log(`
+\u{1F511} PlayerPrefs Keys Accessed (${prefsKeys.length}):`);
+  prefsKeys.slice(0, 15).forEach((k) => console.log(`   - ${k}`));
+  if (prefsKeys.length > 15)
+    console.log(`   ... and ${prefsKeys.length - 15} more`);
+  console.log(`
+\u{1F4E6} Asset Bundles Loaded (${assetBundles.length}):`);
+  assetBundles.slice(0, 10).forEach((b) => console.log(`   - ${b}`));
+  console.log(`
+\u{1F4C5} Timeline (first 40 operations):`);
   console.log("\u2500".repeat(66));
-  const sortedPaths = Array.from(pathStats.entries()).sort((a, b) => b[1].opens + b[1].reads + b[1].writes - (a[1].opens + a[1].reads + a[1].writes)).slice(0, 30);
-  for (const [path, stats] of sortedPaths) {
-    const total = stats.opens + stats.reads + stats.writes;
-    const shortPath = path.length > 50 ? "..." + path.slice(-47) : path;
-    console.log(`   [${total.toString().padStart(3)}] O:${stats.opens} R:${stats.reads} W:${stats.writes} | ${shortPath}`);
+  for (const op of operations.slice(0, 40)) {
+    const cat = op.category.padEnd(6);
+    const target = op.target.length > 40 ? "..." + op.target.slice(-37) : op.target;
+    console.log(`   [${op.t.toFixed(2)}s] [${cat}] ${op.op}: ${target}`);
   }
-  console.log(`
-\u{1F4C5} Timeline (first 30 operations):`);
-  console.log("\u2500".repeat(66));
-  for (const op of fileOperations.slice(0, 30)) {
-    const opIcon = op.op === "read" ? "\u{1F4D6}" : op.op === "write" ? "\u{1F4DD}" : op.op === "open" ? "\u{1F4C2}" : "\u{1F4C1}";
-    const shortPath = op.path.length > 40 ? "..." + op.path.slice(-37) : op.path;
-    const sizeStr = op.size ? ` (${op.size}B)` : "";
-    console.log(`   [${op.t.toFixed(2)}s] ${opIcon} ${op.op.padEnd(10)} ${shortPath}${sizeStr}`);
-  }
-  if (fileOperations.length > 30) {
-    console.log(`   ... and ${fileOperations.length - 30} more operations`);
-  }
+  if (operations.length > 40)
+    console.log(`   ... and ${operations.length - 40} more`);
   console.log(`
 \u{1F4CB} JSON Summary:`);
   console.log("\u2500".repeat(66));
   const summary = {
-    session: { duration: totalTime, totalOps: fileOperations.length, uniquePaths: pathStats.size },
-    operationCounts: opCounts,
-    topPaths: sortedPaths.slice(0, 15).map(([path, stats]) => ({ path, ...stats })),
-    operations: fileOperations.slice(0, 50).map((o) => ({
-      t: o.t,
-      op: o.op,
-      path: o.path.length > 60 ? "..." + o.path.slice(-57) : o.path,
-      size: o.size
-    }))
+    duration: totalTime,
+    totalOps: operations.length,
+    byCategory: Object.fromEntries(categories.map((c) => [c, operations.filter((o) => o.category === c).length])),
+    saveEvents: saveDataEvents,
+    prefsKeys: prefsKeys.slice(0, 20),
+    assetBundles: assetBundles.slice(0, 10),
+    timeline: operations.slice(0, 30).map((o) => ({ t: o.t, cat: o.category, op: o.op, target: o.target.substring(0, 50) }))
   };
   console.log(JSON.stringify(summary, null, 2));
   console.log("\n" + "\u2550".repeat(66));
 }
-hookNativeFileIO();
+hookNativeIO();
 hookIl2Cpp();
