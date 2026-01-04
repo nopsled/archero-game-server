@@ -346,9 +346,9 @@ def create_default_login_response(trans_id: int) -> CRespUserLoginPacket:
 
     return CRespUserLoginPacket(
         m_nTransID=trans_id,
-        m_nCoins=199,
-        m_nDiamonds=120,
-        m_nLevel=1,
+        m_nCoins=1,
+        m_nDiamonds=1,
+        m_nLevel=30,
         m_nExperince=0,
         m_nUserRawId=72276397022577740,  # Random large ID
         m_nNowTime=now,
@@ -416,7 +416,7 @@ def create_default_login_response(trans_id: int) -> CRespUserLoginPacket:
         m_nGuildStopTimestamp=0,
         m_nStarDiamond=0,
         m_nExperinceInt64=0,
-        m_nCoinsInt64=199,
+        m_nCoinsInt64=1,
         m_nImprintBoxKeyCount=0,
         m_nMaxHellLayer=0,
         m_nHellLayerBoxID=0,

@@ -22,7 +22,7 @@ console.log("╚═════════════════════�
 // CONFIGURATION
 // =============================================================================
 
-const DISCOVERY_DURATION_MS = 30000;
+const DISCOVERY_DURATION_MS = 45000;
 const LOG_CONTENT_PREVIEW = true;
 const MAX_PREVIEW_LEN = 128;
 
