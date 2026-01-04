@@ -1,78 +1,55 @@
 /**
  * TLS Traffic Logger - Android
- *
- * Intercepts PLAINTEXT data before TLS encryption and after decryption
- * by hooking BouncyCastle TlsProtocol.WriteData and ReadApplicationData.
- *
- * Usage:
- *   cd client-ts
- *   bun run build:port443
- *   frida -U -f com.habby.archero -l android/build/port_443_logger.js
+ * Captures plaintext HTTPS traffic with domain correlation
+ * 
+ * Domain resolution strategy:
+ * 1. SSL_get_fd -> fd -> IP -> hostname from getaddrinfo cache
+ * 2. Parse HTTP Host header from request content
+ * 3. Track SSL* -> hostname from SSL_set_tlsext_host_name (SNI)
  */
 
 /// <reference path="../../frida.d.ts" />
 
 console.log("╔══════════════════════════════════════════════════════════════╗");
-console.log("║     ARCHERO TLS TRAFFIC LOGGER (Android)                     ║");
-console.log("║     Intercepts plaintext before/after TLS encryption         ║");
+console.log("║     ARCHERO TLS TRAFFIC LOGGER                               ║");
 console.log("╚══════════════════════════════════════════════════════════════╝");
 
-// =============================================================================
-// CONFIGURATION
-// =============================================================================
-
-const DISCOVERY_DURATION_MS = 60000; // 60 seconds
+const DISCOVERY_DURATION_MS = 90000;
 const MAX_CAPTURE_BYTES = 2048;
-const LOG_HEX_DUMP = true;
-const LOG_ASCII = true;
 
 let startTime = 0;
-
 function elapsed(): number {
   return startTime > 0 ? (Date.now() - startTime) / 1000 : 0;
 }
-
 function ts(): string {
   return `[${elapsed().toFixed(2)}s]`;
 }
 
-// =============================================================================
-// DATA STRUCTURES
-// =============================================================================
+// ===== MAPPING TABLES =====
+// Map fd -> IP:port from connect()
+const fdToAddr = new Map<number, { ip: string; port: number }>();
+// Map IP -> hostname from getaddrinfo
+const ipToHostname = new Map<string, string>();
+// Map SSL* -> fd from SSL_set_fd
+const sslToFd = new Map<string, number>();
+// Map SSL* -> hostname from SNI or first HTTP request
+const sslToHostname = new Map<string, string>();
+// Track hostname -> IPs from getaddrinfo results
+const hostnameToIPs = new Map<string, string[]>();
+
+// Native function pointers
+let SSL_get_fd: NativeFunction<number, [NativePointer]> | null = null;
 
 interface TlsCapture {
   t: number;
-  direction: "write" | "read";
-  bytes: number;
-  preview: string;
-  hex?: string;
-}
-
-interface Connection {
-  t: number;
-  ip: string;
+  direction: "send" | "recv";
+  host: string;
   port: number;
+  bytes: number;
+  ascii: string;
 }
 
-const tlsCaptures: TlsCapture[] = [];
-const connections: Connection[] = [];
-const dnsLookups = new Map<string, number>();
-
-// =============================================================================
-// HELPERS
-// =============================================================================
-
-function toHex(buffer: ArrayBuffer, maxBytes = MAX_CAPTURE_BYTES): string {
-  const bytes = new Uint8Array(buffer);
-  const length = Math.min(bytes.length, maxBytes);
-  let out = "";
-  for (let i = 0; i < length; i++) {
-    out += bytes[i].toString(16).padStart(2, "0") + " ";
-    if ((i + 1) % 32 === 0) out += "\n                    ";
-  }
-  if (bytes.length > maxBytes) out += `...(+${bytes.length - maxBytes}B)`;
-  return out.trim();
-}
+const captures: TlsCapture[] = [];
 
 function toAscii(buffer: ArrayBuffer, maxBytes = MAX_CAPTURE_BYTES): string {
   const bytes = new Uint8Array(buffer);
@@ -80,47 +57,103 @@ function toAscii(buffer: ArrayBuffer, maxBytes = MAX_CAPTURE_BYTES): string {
   let out = "";
   for (let i = 0; i < length; i++) {
     const b = bytes[i];
-    out += b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : ".";
+    if (b === 0x0d) out += "\\r";
+    else if (b === 0x0a) out += "\\n";
+    else if (b >= 0x20 && b <= 0x7e) out += String.fromCharCode(b);
+    else out += ".";
   }
-  if (bytes.length > maxBytes) out += `...(+${bytes.length - maxBytes}B)`;
   return out;
 }
 
-function readIl2CppByteArray(
-  arrayPtr: NativePointer,
-  offset: number,
-  len: number
-): ArrayBuffer | null {
+// Extract Host header from HTTP request data
+function extractHostHeader(data: ArrayBuffer): string | null {
   try {
-    if (arrayPtr.isNull()) return null;
+    const bytes = new Uint8Array(data);
+    // Only check first 1KB for headers
+    const maxLen = Math.min(bytes.length, 1024);
+    let str = "";
+    for (let i = 0; i < maxLen; i++) {
+      str += String.fromCharCode(bytes[i]);
+    }
+    // Look for Host: header (case insensitive)
+    const match = str.match(/\r\nHost:\s*([^\r\n]+)/i);
+    if (match) {
+      // Remove port if present
+      return match[1].split(":")[0].trim();
+    }
+  } catch { }
+  return null;
+}
 
-    // IL2CPP array structure:
-    // +0x00: Il2CppObject (klass pointer, monitor)
-    // +0x10: bounds (for multi-dim arrays, usually null for 1D)
-    // +0x18: max_length (size_t)
-    // +0x20: data starts (for 64-bit)
-    // For 32-bit it's different offsets
-
-    const is64Bit = Process.pointerSize === 8;
-    const dataOffset = is64Bit ? 0x20 : 0x10;
-
-    const dataPtr = arrayPtr.add(dataOffset).add(offset);
-    return dataPtr.readByteArray(len);
-  } catch (e) {
-    return null;
+function getHostForFd(fd: number): { host: string; port: number } {
+  const addr = fdToAddr.get(fd);
+  if (addr) {
+    const hostname = ipToHostname.get(addr.ip) || addr.ip;
+    return { host: hostname, port: addr.port };
   }
+  return { host: "unknown", port: 443 };
+}
+
+function getHostForSSL(ssl: NativePointer, dataForHostExtract?: ArrayBuffer): { host: string; port: number } {
+  const sslKey = ssl.toString();
+
+  // 1. Check if we already cached hostname for this SSL*
+  const cachedHost = sslToHostname.get(sslKey);
+  if (cachedHost) {
+    // Get port from fd mapping
+    const cachedFd = sslToFd.get(sslKey);
+    if (cachedFd !== undefined) {
+      const addr = fdToAddr.get(cachedFd);
+      return { host: cachedHost, port: addr?.port || 443 };
+    }
+    return { host: cachedHost, port: 443 };
+  }
+
+  // 2. Try to get fd via SSL_get_fd
+  let fd = -1;
+  if (SSL_get_fd) {
+    try {
+      fd = SSL_get_fd(ssl);
+      if (fd >= 0) {
+        sslToFd.set(sslKey, fd);
+      }
+    } catch { }
+  }
+
+  // 3. Try extracting Host header from HTTP data
+  if (dataForHostExtract) {
+    const hostFromHeader = extractHostHeader(dataForHostExtract);
+    if (hostFromHeader) {
+      sslToHostname.set(sslKey, hostFromHeader);
+      // Also try to update IP mapping if we have the fd
+      if (fd >= 0) {
+        const addr = fdToAddr.get(fd);
+        if (addr && !ipToHostname.has(addr.ip)) {
+          ipToHostname.set(addr.ip, hostFromHeader);
+        }
+      }
+      const addr = fd >= 0 ? fdToAddr.get(fd) : undefined;
+      return { host: hostFromHeader, port: addr?.port || 443 };
+    }
+  }
+
+  // 4. Fall back to fd -> IP -> hostname chain
+  if (fd >= 0) {
+    return getHostForFd(fd);
+  }
+
+  return { host: "unknown", port: 443 };
 }
 
 // =============================================================================
-// NATIVE DNS/CONNECT HOOKS
+// HOOKS
 // =============================================================================
 
-function hookNativeNetwork(): void {
-  console.log(`\n${ts()} [HOOKS] Installing native network hooks...`);
-
+function hookNetwork(): void {
+  console.log(`\n${ts()} [HOOKS] Installing hooks...`);
   const libc = Process.getModuleByName("libc.so");
 
-  // --- getaddrinfo ---
+  // getaddrinfo - map hostname -> IPs and IP -> hostname
   try {
     const ptr = libc.findExportByName("getaddrinfo");
     if (ptr) {
@@ -128,6 +161,7 @@ function hookNativeNetwork(): void {
         onEnter(args) {
           try {
             (this as any).hostname = args[0].readUtf8String();
+            (this as any).result = args[3];  // struct addrinfo **res
           } catch {
             (this as any).hostname = null;
           }
@@ -135,391 +169,186 @@ function hookNativeNetwork(): void {
         onLeave(retval) {
           try {
             const hostname = (this as any).hostname;
-            if (hostname && retval.toInt32() === 0) {
-              dnsLookups.set(hostname, elapsed());
-              console.log(`${ts()} [DNS] 🔍 ${hostname}`);
+            const resultPtr = (this as any).result;
+            if (hostname && retval.toInt32() === 0 && resultPtr) {
+              // Parse result list to get all resolved IPs
+              let ai = resultPtr.readPointer();
+              const ips: string[] = [];
+              while (!ai.isNull()) {
+                const family = ai.add(4).readInt();  // ai_family
+                if (family === 2) {  // AF_INET
+                  const addr = ai.add(Process.pointerSize === 8 ? 24 : 16).readPointer();
+                  if (!addr.isNull()) {
+                    // Skip first 2 bytes (address family), then 2 bytes port, then 4 bytes IP
+                    const ip = `${addr.add(4).readU8()}.${addr.add(5).readU8()}.${addr.add(6).readU8()}.${addr.add(7).readU8()}`;
+                    ips.push(ip);
+                    if (!ipToHostname.has(ip)) {
+                      ipToHostname.set(ip, hostname);
+                    }
+                  }
+                }
+                // Move to next result
+                ai = ai.add(Process.pointerSize === 8 ? 48 : 32).readPointer();
+              }
+              if (ips.length > 0) {
+                hostnameToIPs.set(hostname, ips);
+              }
             }
           } catch {}
         },
       });
-      console.log("   ✓ getaddrinfo()");
+      console.log("   ✓ getaddrinfo");
     }
-  } catch (e) {
-    console.log(`   ✗ getaddrinfo failed: ${e}`);
-  }
+  } catch { }
 
-  // --- connect ---
+  // connect - track fd -> address
   try {
     const ptr = libc.findExportByName("connect");
     if (ptr) {
       Interceptor.attach(ptr, {
         onEnter(args) {
           try {
+            const fd = args[0].toInt32();
             const sockaddr = args[1];
             const family = sockaddr.readU16();
             if (family === 2) {
               // AF_INET
               const portBE = sockaddr.add(2).readU16();
               const port = ((portBE & 0xff) << 8) | ((portBE >> 8) & 0xff);
-              const ip =
-                sockaddr.add(4).readU8() +
-                "." +
-                sockaddr.add(5).readU8() +
-                "." +
-                sockaddr.add(6).readU8() +
-                "." +
-                sockaddr.add(7).readU8();
-
-              if (port === 443) {
-                console.log(`${ts()} [TCP] 🔌 connect → ${ip}:${port}`);
-                connections.push({ t: elapsed(), ip, port });
-              }
+              const ip = `${sockaddr.add(4).readU8()}.${sockaddr.add(5).readU8()}.${sockaddr.add(6).readU8()}.${sockaddr.add(7).readU8()}`;
+              fdToAddr.set(fd, { ip, port });
             }
           } catch {}
         },
       });
-      console.log("   ✓ connect()");
+      console.log("   ✓ connect");
     }
-  } catch (e) {
-    console.log(`   ✗ connect failed: ${e}`);
-  }
-}
+  } catch { }
 
-// =============================================================================
-// NATIVE TLS HOOKS (BouncyCastle in libil2cpp.so)
-// =============================================================================
+  // Find SSL module and hook
+  const modules = Process.enumerateModules();
+  for (const mod of modules) {
+    if (mod.name.toLowerCase().includes("ssl")) {
+      // Get SSL_get_fd for resolving hostname
+      try {
+        const getFdPtr = mod.findExportByName("SSL_get_fd");
+        if (getFdPtr) {
+          SSL_get_fd = new NativeFunction(getFdPtr, "int", ["pointer"]);
+          console.log(`   ✓ SSL_get_fd`);
+        }
+      } catch { }
 
-function hookTlsNative(): void {
-  console.log(`\n${ts()} [HOOKS] Installing native TLS hooks (BouncyCastle)...`);
+      // SSL_set_fd - track SSL* -> fd mapping
+      try {
+        const setFdPtr = mod.findExportByName("SSL_set_fd");
+        if (setFdPtr) {
+          Interceptor.attach(setFdPtr, {
+            onEnter(args) {
+              const ssl = args[0];
+              const fd = args[1].toInt32();
+              sslToFd.set(ssl.toString(), fd);
+            },
+          });
+          console.log(`   ✓ SSL_set_fd`);
+        }
+      } catch { }
 
-  const libil2cpp = Process.getModuleByName("libil2cpp.so");
-  console.log(`   libil2cpp.so base: ${libil2cpp.base}`);
-
-  // Addresses from IDA analysis:
-  // TlsProtocol.WriteData: 0x50dd42c
-  // TlsProtocol.ReadApplicationData: 0x50dcc88
-  // BestHTTP versions:
-  // TlsProtocol.WriteData: 0x600dfa4
-  // TlsProtocol.ReadApplicationData: 0x600ce4c
-
-  const hookPoints = [
-    // BouncyCastle (Org.BouncyCastle.Crypto.Tls.TlsProtocol)
-    { name: "TlsProtocol.WriteData", offset: 0x50dd42c, direction: "write" as const },
-    { name: "TlsProtocol.ReadApplicationData", offset: 0x50dcc88, direction: "read" as const },
-    // BestHTTP SecureProtocol version
-    {
-      name: "BestHTTP.TlsProtocol.WriteData",
-      offset: 0x600dfa4,
-      direction: "write" as const,
-    },
-    {
-      name: "BestHTTP.TlsProtocol.ReadApplicationData",
-      offset: 0x600ce4c,
-      direction: "read" as const,
-    },
-  ];
-
-  for (const hook of hookPoints) {
-    try {
-      const addr = libil2cpp.base.add(hook.offset);
-
-      Interceptor.attach(addr, {
-        onEnter(args) {
-          // void WriteData(TlsProtocol* this, Byte[] buf, int offset, int len)
-          // int ReadApplicationData(TlsProtocol* this, Byte[] buf, int offset, int len)
-          (this as any).buf = args[1];
-          (this as any).offset = args[2].toInt32();
-          (this as any).len = args[3].toInt32();
-          (this as any).direction = hook.direction;
-          (this as any).name = hook.name;
-        },
-        onLeave(retval) {
-          try {
-            const buf = (this as any).buf;
-            const offset = (this as any).offset;
-            let len = (this as any).len;
-            const direction = (this as any).direction;
-            const name = (this as any).name;
-
-            // For read, the return value is the actual bytes read
-            if (direction === "read") {
-              const actualRead = retval.toInt32();
-              if (actualRead > 0) {
-                len = actualRead;
-              } else {
-                return; // No data read
+      // SSL_read
+      try {
+        const sslRead = mod.findExportByName("SSL_read");
+        if (sslRead) {
+          Interceptor.attach(sslRead, {
+            onEnter(args) {
+              (this as any).ssl = args[0];
+              (this as any).buf = args[1];
+            },
+            onLeave(retval) {
+              const ret = retval.toInt32();
+              if (ret > 0) {
+                const data = (this as any).buf.readByteArray(Math.min(ret, MAX_CAPTURE_BYTES));
+                if (data) {
+                  // For recv, try to extract host from response cookies/headers if needed
+                  const { host, port } = getHostForSSL((this as any).ssl, undefined);
+                  const ascii = toAscii(data);
+                  console.log(`\n${ts()} [RECV] ← ${host}:${port} (${ret}B)`);
+                  console.log(`   ${ascii.substring(0, 400)}${ascii.length > 400 ? "..." : ""}`);
+                  captures.push({ t: elapsed(), direction: "recv", host, port, bytes: ret, ascii });
+                }
               }
-            }
+            },
+          });
+          console.log(`   ✓ SSL_read`);
+        }
+      } catch { }
 
-            if (len <= 0) return;
-
-            const data = readIl2CppByteArray(buf, offset, Math.min(len, MAX_CAPTURE_BYTES));
-            if (!data) return;
-
-            const hex = toHex(data);
-            const ascii = toAscii(data);
-
-            const arrow = direction === "write" ? "↑ SEND" : "↓ RECV";
-            console.log(`\n${ts()} [TLS] ${arrow} (${len}B) via ${name}`);
-
-            if (LOG_HEX_DUMP) {
-              console.log(`        ${hex}`);
-            }
-            if (LOG_ASCII) {
-              const preview = ascii.substring(0, 200);
-              console.log(`        ASCII: "${preview}${ascii.length > 200 ? "..." : ""}"`);
-            }
-
-            tlsCaptures.push({
-              t: elapsed(),
-              direction,
-              bytes: len,
-              preview: ascii.substring(0, 500),
-              hex: hex.substring(0, 500),
-            });
-          } catch (e) {
-            // Silently ignore errors
-          }
-        },
-      });
-
-      console.log(`   ✓ ${hook.name} @ ${addr}`);
-    } catch (e) {
-      console.log(`   ✗ ${hook.name} failed: ${e}`);
-    }
-  }
-
-  // Also hook TlsStream.Write/Read as alternative entry points
-  const streamHooks = [
-    { name: "TlsStream.Write (BC)", offset: 0x50ea398, direction: "write" as const },
-    { name: "TlsStream.Read (BC)", offset: 0x50ea26c, direction: "read" as const },
-    { name: "TlsStream.Write (BestHTTP)", offset: 0x601c0b8, direction: "write" as const },
-  ];
-
-  for (const hook of streamHooks) {
-    try {
-      const addr = libil2cpp.base.add(hook.offset);
-
-      Interceptor.attach(addr, {
-        onEnter(args) {
-          (this as any).buf = args[1];
-          (this as any).offset = args[2].toInt32();
-          (this as any).len = args[3].toInt32();
-          (this as any).direction = hook.direction;
-          (this as any).name = hook.name;
-        },
-        onLeave(retval) {
-          try {
-            const buf = (this as any).buf;
-            const offset = (this as any).offset;
-            let len = (this as any).len;
-            const direction = (this as any).direction;
-            const name = (this as any).name;
-
-            if (direction === "read") {
-              const actualRead = retval.toInt32();
-              if (actualRead > 0) {
-                len = actualRead;
-              } else {
-                return;
+      // SSL_write
+      try {
+        const sslWrite = mod.findExportByName("SSL_write");
+        if (sslWrite) {
+          Interceptor.attach(sslWrite, {
+            onEnter(args) {
+              (this as any).ssl = args[0];
+              (this as any).buf = args[1];
+              (this as any).num = args[2].toInt32();
+            },
+            onLeave(retval) {
+              const ret = retval.toInt32();
+              if (ret > 0) {
+                const data = (this as any).buf.readByteArray(Math.min(ret, MAX_CAPTURE_BYTES));
+                if (data) {
+                  // For send, extract Host header from HTTP request
+                  const { host, port } = getHostForSSL((this as any).ssl, data);
+                  const ascii = toAscii(data);
+                  console.log(`\n${ts()} [SEND] → ${host}:${port} (${ret}B)`);
+                  console.log(`   ${ascii.substring(0, 400)}${ascii.length > 400 ? "..." : ""}`);
+                  captures.push({ t: elapsed(), direction: "send", host, port, bytes: ret, ascii });
+                }
               }
-            }
-
-            if (len <= 0 || len > 100000) return;
-
-            const data = readIl2CppByteArray(buf, offset, Math.min(len, MAX_CAPTURE_BYTES));
-            if (!data) return;
-
-            const ascii = toAscii(data);
-            const arrow = direction === "write" ? "↑" : "↓";
-
-            // Only log if we haven't seen this in TlsProtocol hooks
-            // (to avoid duplicates)
-            console.log(`${ts()} [TLS-STREAM] ${arrow} ${name} (${len}B)`);
-          } catch {}
-        },
-      });
-
-      console.log(`   ✓ ${hook.name} @ ${addr}`);
-    } catch (e) {
-      console.log(`   ✗ ${hook.name} failed: ${e}`);
+            },
+          });
+          console.log(`   ✓ SSL_write`);
+        }
+      } catch { }
+      break; // Only hook first SSL library
     }
   }
 }
-
-// =============================================================================
-// SslStream HOOKS (System.Net.Security)
-// =============================================================================
-
-function hookSslStream(): void {
-  console.log(`\n${ts()} [HOOKS] Installing SslStream hooks...`);
-
-  const libil2cpp = Process.getModuleByName("libil2cpp.so");
-
-  // System.Net.Security.SslStream
-  const sslStreamHooks = [
-    { name: "SslStream.Write", offset: 0x7feec7c, direction: "write" as const },
-    { name: "SslStream.Read", offset: 0x7feec28, direction: "read" as const },
-  ];
-
-  for (const hook of sslStreamHooks) {
-    try {
-      const addr = libil2cpp.base.add(hook.offset);
-
-      Interceptor.attach(addr, {
-        onEnter(args) {
-          // void Write(SslStream* this, Byte[] buffer, int offset, int count)
-          // int Read(SslStream* this, Byte[] buffer, int offset, int count)
-          (this as any).buf = args[1];
-          (this as any).offset = args[2].toInt32();
-          (this as any).len = args[3].toInt32();
-          (this as any).direction = hook.direction;
-          (this as any).name = hook.name;
-        },
-        onLeave(retval) {
-          try {
-            const buf = (this as any).buf;
-            const offset = (this as any).offset;
-            let len = (this as any).len;
-            const direction = (this as any).direction;
-            const name = (this as any).name;
-
-            if (direction === "read") {
-              const actualRead = retval.toInt32();
-              if (actualRead > 0) {
-                len = actualRead;
-              } else {
-                return;
-              }
-            }
-
-            if (len <= 0 || len > 100000) return;
-
-            const data = readIl2CppByteArray(buf, offset, Math.min(len, MAX_CAPTURE_BYTES));
-            if (!data) return;
-
-            const hex = toHex(data);
-            const ascii = toAscii(data);
-
-            const arrow = direction === "write" ? "↑ SEND" : "↓ RECV";
-            console.log(`\n${ts()} [SSL] ${arrow} (${len}B) via ${name}`);
-
-            if (LOG_HEX_DUMP) {
-              console.log(`        ${hex}`);
-            }
-            if (LOG_ASCII) {
-              const preview = ascii.substring(0, 200);
-              console.log(`        ASCII: "${preview}${ascii.length > 200 ? "..." : ""}"`);
-            }
-
-            tlsCaptures.push({
-              t: elapsed(),
-              direction,
-              bytes: len,
-              preview: ascii.substring(0, 500),
-              hex: hex.substring(0, 500),
-            });
-          } catch {}
-        },
-      });
-
-      console.log(`   ✓ ${hook.name} @ ${addr}`);
-    } catch (e) {
-      console.log(`   ✗ ${hook.name} failed: ${e}`);
-    }
-  }
-}
-
-// =============================================================================
-// SUMMARY
-// =============================================================================
 
 function printSummary(): void {
   console.log("\n\n");
   console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║               TLS TRAFFIC CAPTURE SUMMARY                    ║");
+  console.log("║               TLS TRAFFIC SUMMARY                            ║");
   console.log("╚══════════════════════════════════════════════════════════════╝");
 
-  console.log(`\n📊 Session Statistics:`);
-  console.log(`   Duration: ${elapsed().toFixed(1)}s`);
-  console.log(`   DNS lookups: ${dnsLookups.size}`);
-  console.log(`   TCP connections (443): ${connections.length}`);
-  console.log(`   TLS captures: ${tlsCaptures.length}`);
-
-  const totalSent = tlsCaptures
-    .filter((c) => c.direction === "write")
-    .reduce((sum, c) => sum + c.bytes, 0);
-  const totalRecv = tlsCaptures
-    .filter((c) => c.direction === "read")
-    .reduce((sum, c) => sum + c.bytes, 0);
-
-  console.log(`   Total plaintext sent: ${totalSent} bytes`);
-  console.log(`   Total plaintext received: ${totalRecv} bytes`);
-
-  // DNS lookups
-  console.log(`\n🔍 DNS Lookups:`);
-  console.log("─".repeat(66));
-  for (const [hostname, t] of dnsLookups.entries()) {
-    console.log(`   [${t.toFixed(2)}s] ${hostname}`);
+  const byHost = new Map<string, { send: number; recv: number; count: number }>();
+  for (const cap of captures) {
+    const key = cap.host;
+    const stats = byHost.get(key) || { send: 0, recv: 0, count: 0 };
+    if (cap.direction === "send") stats.send += cap.bytes;
+    else stats.recv += cap.bytes;
+    stats.count++;
+    byHost.set(key, stats);
   }
 
-  // Connections
-  console.log(`\n🔌 TLS Connections (port 443):`);
-  console.log("─".repeat(66));
-  for (const conn of connections) {
-    console.log(`   [${conn.t.toFixed(2)}s] ${conn.ip}:${conn.port}`);
+  console.log(`\n📊 Traffic by host:`);
+  for (const [host, stats] of byHost.entries()) {
+    console.log(`   ${host}: ${stats.count} requests, ↑${stats.send}B ↓${stats.recv}B`);
   }
 
-  // Sample captures
-  console.log(`\n📦 Sample TLS Captures (first 30):`);
-  console.log("─".repeat(66));
-  for (const cap of tlsCaptures.slice(0, 30)) {
-    const arrow = cap.direction === "write" ? "↑" : "↓";
-    console.log(`   [${cap.t.toFixed(2)}s] ${arrow} ${cap.bytes}B`);
-    console.log(`      "${cap.preview.substring(0, 80)}${cap.preview.length > 80 ? "..." : ""}"`);
+  console.log(`\n📊 Total: ${captures.length} captures`);
+  console.log(`\n📊 Known IP → hostname mappings:`);
+  for (const [ip, host] of ipToHostname.entries()) {
+    console.log(`   ${ip} → ${host}`);
   }
-  if (tlsCaptures.length > 30) {
-    console.log(`   ... and ${tlsCaptures.length - 30} more captures`);
-  }
-
-  // JSON summary
-  console.log(`\n📋 JSON Summary:`);
-  console.log("─".repeat(66));
-  const summary = {
-    session: {
-      duration: elapsed(),
-      dnsLookups: dnsLookups.size,
-      connections: connections.length,
-      tlsCaptures: tlsCaptures.length,
-      totalSent,
-      totalRecv,
-    },
-    hostnames: Array.from(dnsLookups.keys()),
-    ips: connections.map((c) => c.ip),
-  };
-  console.log(JSON.stringify(summary, null, 2));
-
-  console.log("\n" + "═".repeat(66));
+  console.log(`\n📊 Active SSL connections: ${sslToHostname.size}`);
 }
-
-// =============================================================================
-// MAIN
-// =============================================================================
 
 function main(): void {
   startTime = Date.now();
-
-  hookNativeNetwork();
-  hookTlsNative();
-  hookSslStream();
-
-  console.log(`\n${ts()} [READY] Capturing TLS traffic for ${DISCOVERY_DURATION_MS / 1000}s...`);
+  hookNetwork();
+  console.log(`\n${ts()} [READY] Capturing for ${DISCOVERY_DURATION_MS / 1000}s...`);
   console.log("═".repeat(66));
-
   setTimeout(() => printSummary(), DISCOVERY_DURATION_MS);
 }
 
-// Start after a short delay to let the process initialize
-setTimeout(() => {
-  main();
-}, 500);
+setTimeout(() => main(), 500);
