@@ -247,74 +247,56 @@ function printFields(fields: Record<string, any>, indent: string = "│   "): vo
 function hookNativeNetwork(): void {
   console.log("[NATIVE] Setting up DNS/Socket hooks...");
   
-  // Hook getaddrinfo for DNS
-  const getaddrinfoPtr = Module.findExportByName(null, "getaddrinfo");
-  if (getaddrinfoPtr) {
-    const getaddrinfoFn = new NativeFunction(getaddrinfoPtr, "int", ["pointer", "pointer", "pointer", "pointer"]);
-    
-    Interceptor.replace(getaddrinfoPtr, new NativeCallback((name, service, hints, res) => {
-      const hostname = name.readUtf8String() ?? "<null>";
-      const result = getaddrinfoFn(name, service, hints, res) as number;
-      
-      if (result === 0 && hostname !== "<null>") {
-        try {
-          const list = (res as NativePointer).readPointer();
-          if (!list.isNull()) {
-            let cur = list;
-            let safety = 0;
-            while (!cur.isNull() && safety++ < 10) {
-              const family = cur.add(4).readS32();
-              // Android uses different struct layout based on pointer size
-              const aiAddr = cur.add(Process.pointerSize === 8 ? 24 : 16).readPointer();
-              
-              if (family === 2 && !aiAddr.isNull()) { // AF_INET
-                const ipBytes = aiAddr.add(4);
-                const ip = `${ipBytes.readU8()}.${ipBytes.add(1).readU8()}.${ipBytes.add(2).readU8()}.${ipBytes.add(3).readU8()}`;
-                
-                if (!dnsLookups.has(hostname)) {
-                  dnsLookups.set(hostname, []);
-                }
-                const ips = dnsLookups.get(hostname)!;
-                if (!ips.includes(ip)) {
-                  ips.push(ip);
-                  console.log(`${ts()} [DNS] ${hostname} → ${ip}`);
-                  logEvent({ t: elapsed(), phase: "dns", data: { hostname, ip } });
-                }
+  try {
+    // Hook getaddrinfo for DNS
+    const getaddrinfoPtr = Module.findExportByName(null, "getaddrinfo");
+    if (getaddrinfoPtr) {
+      Interceptor.attach(getaddrinfoPtr, {
+        onEnter(args) {
+          try { this.hostname = args[0].readUtf8String(); } catch (e) { this.hostname = null; }
+        },
+        onLeave(retval) {
+          try {
+            if (this.hostname && retval.toInt32() === 0) {
+              console.log(`${ts()} [DNS] ${this.hostname} → (resolved)`);
+              if (!dnsLookups.has(this.hostname)) {
+                dnsLookups.set(this.hostname, []);
               }
-              cur = cur.add(Process.pointerSize === 8 ? 40 : 32).readPointer();
+              logEvent({ t: elapsed(), phase: "dns", data: { hostname: this.hostname } });
             }
-          }
-        } catch (e) {
-          // ignore parse errors
+          } catch (e) { }
         }
-      }
-      return result;
-    }, "int", ["pointer", "pointer", "pointer", "pointer"]));
-    console.log("   ✓ getaddrinfo hooked");
-  }
-  
-  // Hook connect() for TCP connections
-  const connectPtr = Module.findExportByName(null, "connect");
-  if (connectPtr) {
-    Interceptor.attach(connectPtr, {
-      onEnter(args) {
-        const sockaddr = args[1];
-        const family = sockaddr.readU16(); // Android uses sa_family_t
-        
-        if (family === 2) { // AF_INET
-          const portBE = sockaddr.add(2).readU16();
-          const port = ((portBE & 0xff) << 8) | ((portBE >> 8) & 0xff);
-          const ip = `${sockaddr.add(4).readU8()}.${sockaddr.add(5).readU8()}.${sockaddr.add(6).readU8()}.${sockaddr.add(7).readU8()}`;
-          
-          if (port === 443 || port === 12020 || port === 80 || port === 8080) {
-            console.log(`${ts()} [CONNECT] ${ip}:${port}`);
-            connections.push({ ip, port, t: elapsed() });
-            logEvent({ t: elapsed(), phase: "connect", data: { ip, port } });
-          }
+      });
+      console.log("   ✓ getaddrinfo hooked");
+    }
+
+    // Hook connect() for TCP connections
+    const connectPtr = Module.findExportByName(null, "connect");
+    if (connectPtr) {
+      Interceptor.attach(connectPtr, {
+        onEnter(args) {
+          try {
+            const sockaddr = args[1];
+            const family = sockaddr.readU16();
+
+            if (family === 2) { // AF_INET
+              const portBE = sockaddr.add(2).readU16();
+              const port = ((portBE & 0xff) << 8) | ((portBE >> 8) & 0xff);
+              const ip = `${sockaddr.add(4).readU8()}.${sockaddr.add(5).readU8()}.${sockaddr.add(6).readU8()}.${sockaddr.add(7).readU8()}`;
+
+              if (port === 443 || port === 12020 || port === 80 || port === 8080) {
+                console.log(`${ts()} [CONNECT] ${ip}:${port}`);
+                connections.push({ ip, port, t: elapsed() });
+                logEvent({ t: elapsed(), phase: "connect", data: { ip, port } });
+              }
+            }
+          } catch (e) { }
         }
-      }
-    });
-    console.log("   ✓ connect hooked");
+      });
+      console.log("   ✓ connect hooked");
+    }
+  } catch (e) {
+    console.log(`   ✗ Native network hooks failed: ${e}`);
   }
 }
 

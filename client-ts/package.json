@@ -56,7 +56,10 @@
     "auth-discovery:new:log": "bun run build:auth-discovery:new && frida -U -f com.habby.archero -l android/build/auth_flow_discovery_new.js 2>&1 | tee logs/sessions/auth_new_$(date +%Y%m%d_%H%M%S).log",
     "build:storage-discovery": "mkdir -p android/build && bunx frida-compile -o android/build/storage_discovery.js android/new/storage_discovery.ts",
     "storage-discovery": "bun run build:storage-discovery && frida -U -f com.habby.archero -l android/build/storage_discovery.js",
-    "storage-discovery:log": "bun run build:storage-discovery && frida -U -f com.habby.archero -l android/build/storage_discovery.js 2>&1 | tee logs/sessions/storage_$(date +%Y%m%d_%H%M%S).log"
+    "storage-discovery:log": "bun run build:storage-discovery && frida -U -f com.habby.archero -l android/build/storage_discovery.js 2>&1 | tee logs/sessions/storage_$(date +%Y%m%d_%H%M%S).log",
+    "build:combined-discovery": "mkdir -p android/build && bunx frida-compile -o android/build/combined_discovery.js android/new/combined_discovery.ts",
+    "combined-discovery": "bun run build:combined-discovery && frida -U -f com.habby.archero -l android/build/combined_discovery.js",
+    "combined-discovery:log": "bun run build:combined-discovery && frida -U -f com.habby.archero -l android/build/combined_discovery.js 2>&1 | tee logs/sessions/combined_$(date +%Y%m%d_%H%M%S).log"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",
