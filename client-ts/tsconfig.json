@@ -18,6 +18,7 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
+    "frida.d.ts",
     "android/**/*.ts",
     "ios/**/*.ts"
   ],
