@@ -343,35 +343,28 @@ class GameProtocolClient:
         from handlers.login import handle_packet
 
         print(f"[GameProtocol] Client connected from {self.client_address}")
-        print(f"[GameProtocol] Socket fd={self.socket.fileno()}")
 
         try:
             self.socket.settimeout(30.0)  # 30 second timeout for game protocol
-        except Exception as e:
-            print(f"[GameProtocol] settimeout error: {e}")
+        except Exception:
+            pass
 
         while True:
-            fd = self.socket.fileno()
-            if fd == -1:
-                print(f"[GameProtocol] Socket closed (fd=-1) for {self.client_address}")
+            if self.socket.fileno() == -1:
+                print(f"[GameProtocol] Socket closed for {self.client_address}")
                 break
 
             try:
                 chunk = self.socket.recv(4096)
-                print(
-                    f"[GameProtocol] recv returned {len(chunk) if chunk else 0} bytes"
-                )
             except socket.timeout:
-                print(f"[GameProtocol] recv timeout, continuing...")
+                # Send heartbeat to keep connection alive
                 continue
             except Exception as e:
                 print(f"[GameProtocol] Recv error from {self.client_address}: {e}")
                 break
 
             if not chunk:
-                print(
-                    f"[GameProtocol] Client {self.client_address} disconnected (empty recv)"
-                )
+                print(f"[GameProtocol] Client {self.client_address} disconnected")
                 break
 
             self.buffer.extend(chunk)
@@ -442,17 +435,10 @@ class GameProtocolClient:
 
 
 class Client:
-    def __init__(
-        self,
-        socket,
-        alpn: str | None = None,
-        listen_port: int | None = None,
-        debug_raw: bool = False,
-    ):
+    def __init__(self, socket, alpn: str | None = None, listen_port: int | None = None):
         self.socket = socket
         self.alpn = alpn
         self.listen_port = listen_port
-        self.debug_raw = debug_raw
         self.port = -0
 
     def _send_h2_settings(self):
@@ -502,12 +488,6 @@ class Client:
                 break
 
             if len(received_data) > 0:
-                # Log raw data if debug_raw is enabled (port 443)
-                if self.debug_raw:
-                    hex_preview = received_data[:64].hex()
-                    print(
-                        f"[RAW] Received {len(received_data)} bytes: {hex_preview}{'...' if len(received_data) > 64 else ''}"
-                    )
                 if self.alpn == "h2":
                     h2_buffer.extend(received_data)
                     # Parse as many HTTP/2 frames as we can.
@@ -826,21 +806,11 @@ def onNewClient(
         print(f"[+]: New GAME client connected on {listen_port}: {clientAddress}")
         return
 
-    # Port 443 (HTTPS) - game's primary communication port
-    if listen_port == 443:
-        print(
-            f"[+]: New HTTPS client connected on {listen_port}: {clientAddress} (ALPN={alpn})"
-        )
-        # Log raw data for debugging
-        client = Client(
-            clientSocket, alpn=alpn, listen_port=listen_port, debug_raw=True
-        )
-        Thread(target=client.recv).start()
-        return
-
     # Use HTTP handler for other ports
     client = Client(clientSocket, alpn=alpn, listen_port=listen_port)
+    # GameWorldManager.instances.append(client)
     Thread(target=client.recv).start()
+    # Thread(target=client.gameLoop).start()
     if listen_port is None:
         print(f"[+]: New HTTP client connected: {clientAddress}")
     else:
@@ -908,9 +878,8 @@ def loop(server_socket, port, isSSL):
             (not isSSL)
             and context is not None
             and os.environ.get("ARCHERO_PLAIN_DETECT_TLS", "1") == "1"
-            and port != 12020  # Skip TLS detection for game protocol port
         ):
-            # Opportunistically upgrade plain ports if the client is speaking TLS.
+            # Opportunistically upgrade plain ports (e.g. 12020) if the client is speaking TLS.
             try:
                 client_socket.settimeout(1.0)
                 peek = client_socket.recv(5, socket.MSG_PEEK)
@@ -952,31 +921,20 @@ def main():
 
     generate_cert()
 
-    # Port 443 (SSL) - disabled by default
-    # Enable with: ARCHERO_ENABLE_SSL=1 sudo uv run server
-    enable_ssl = os.environ.get("ARCHERO_ENABLE_SSL", "0") == "1"
-    if enable_ssl:
-        sslPort = int(os.environ.get("ARCHERO_SSL_PORT", "443"))
-        sslSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sslSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sslSocket.bind(("0.0.0.0", sslPort))
-            sslSocket.listen(10)
-            Thread(
-                target=loop,
-                args=(
-                    sslSocket,
-                    sslPort,
-                    True,
-                ),
-            ).start()
-            print(f"[+] SSL server enabled on port {sslPort}")
-        except OSError as e:
-            print(f"[-] Failed to bind SSL port {sslPort}: {e}")
-    else:
-        print("[*] SSL server disabled (set ARCHERO_ENABLE_SSL=1 to enable)")
+    sslPort = int(os.environ.get("ARCHERO_SSL_PORT", "443"))
+    sslSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sslSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sslSocket.bind(("0.0.0.0", sslPort))
+    sslSocket.listen(10)
+    Thread(
+        target=loop,
+        args=(
+            sslSocket,
+            sslPort,
+            True,
+        ),
+    ).start()
 
-    # Port 12020 (plain TCP) - enabled by default
     plain_ports_raw = os.environ.get("ARCHERO_PLAIN_PORTS", "12020")
     plain_ports: list[int] = []
     for part in [p.strip() for p in plain_ports_raw.split(",") if p.strip()]:

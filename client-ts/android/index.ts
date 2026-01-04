@@ -2,7 +2,7 @@ import "frida-il2cpp-bridge";
 import { FridaMultipleUnpinning } from "./patchers/multiple_unpinning";
 import { NativeTlsBypass } from "./patchers/native_tls_bypass";
 import { NativeTlsLogger } from "./loggers/native_tls_logger";
-import { Patcher } from "./patchers/socket_patcher";
+import { Patcher } from "./patchers/core/socket_patcher";
 
 console.log("[Agent]: Script loaded");
 

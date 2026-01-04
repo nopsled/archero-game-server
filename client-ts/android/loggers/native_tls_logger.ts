@@ -1,6 +1,6 @@
 /// <reference path="../../frida.d.ts" />
 
-import { Patcher } from "../patchers/socket_patcher";
+import { Patcher } from "../patchers/core/socket_patcher";
 
 function hostMatches(rule: string, host: string) {
   const r = rule.toLowerCase();
