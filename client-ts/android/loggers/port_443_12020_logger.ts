@@ -552,6 +552,7 @@ function hookTLS(): void {
     return name.includes("ssl") || name.includes("crypto") || name.includes("unity");
   });
 
+  for (const mod of sslModules) {
     try {
       const getFdPtr = mod.findExportByName("SSL_get_fd");
       if (getFdPtr) {
@@ -570,35 +571,35 @@ function hookTLS(): void {
       }
     } catch {}
 
-  // SSL_ctrl - captures SNI hostname via SSL_set_tlsext_host_name (cmd=55)
-  try {
-    const ctrlPtr = mod.findExportByName("SSL_ctrl");
-    if (ctrlPtr) {
-      Interceptor.attach(ctrlPtr, {
-        onEnter(args) {
-          try {
-            const cmd = args[1].toInt32();
-            // SSL_CTRL_SET_TLSEXT_HOSTNAME = 55
-            if (cmd === 55) {
-              const hostname = args[3].readUtf8String();
-              if (hostname) {
-                const sslKey = args[0].toString();
-                sslToHostname.set(sslKey, hostname);
-                const fd = sslToFd.get(sslKey);
-                if (fd !== undefined) {
-                  const addr = fdToAddr.get(fd);
-                  if (addr) {
-                    ipToHostname.set(addr.ip, hostname);
+    // SSL_ctrl - captures SNI hostname via SSL_set_tlsext_host_name (cmd=55)
+    try {
+      const ctrlPtr = mod.findExportByName("SSL_ctrl");
+      if (ctrlPtr) {
+        Interceptor.attach(ctrlPtr, {
+          onEnter(args) {
+            try {
+              const cmd = args[1].toInt32();
+              // SSL_CTRL_SET_TLSEXT_HOSTNAME = 55
+              if (cmd === 55) {
+                const hostname = args[3].readUtf8String();
+                if (hostname) {
+                  const sslKey = args[0].toString();
+                  sslToHostname.set(sslKey, hostname);
+                  const fd = sslToFd.get(sslKey);
+                  if (fd !== undefined) {
+                    const addr = fdToAddr.get(fd);
+                    if (addr) {
+                      ipToHostname.set(addr.ip, hostname);
+                    }
                   }
                 }
               }
-            }
-          } catch { }
-        },
-      });
-      console.log("   ✓ SSL_ctrl (SNI)");
-    }
-  } catch { }
+            } catch { }
+          },
+        });
+        console.log("   ✓ SSL_ctrl (SNI)");
+      }
+    } catch { }
 
     try {
       const sslRead = mod.findExportByName("SSL_read");
