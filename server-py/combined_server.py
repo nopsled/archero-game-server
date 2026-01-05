@@ -100,14 +100,17 @@ def create_https_app():
     
     @app.route("/", methods=["GET", "POST"])
     def root():
+        print(f"[HTTPS] {request.method} / from {request.remote_addr}")
         return jsonify({"status": "ok", "server": "archero-emulator"})
     
     @app.route("/api/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
     def api_handler(path):
         """Generic API handler - returns success for all endpoints."""
-        print(f"[HTTPS] {request.method} /api/{path}")
+        print(f"[HTTPS] {request.method} /api/{path} from {request.remote_addr}")
+        print(f"[HTTPS]   Headers: {dict(request.headers)}")
         if request.data:
-            print(f"[HTTPS] Body: {request.data[:200]}...")
+            body_preview = request.data[:500].decode('utf-8', errors='replace')
+            print(f"[HTTPS]   Body ({len(request.data)}b): {body_preview}")
         
         return jsonify({
             "code": 0,
@@ -118,7 +121,11 @@ def create_https_app():
     @app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
     def catch_all(path):
         """Catch-all handler for any other paths."""
-        print(f"[HTTPS] {request.method} /{path}")
+        print(f"[HTTPS] {request.method} /{path} from {request.remote_addr}")
+        print(f"[HTTPS]   Headers: {dict(request.headers)}")
+        if request.data:
+            body_preview = request.data[:500].decode('utf-8', errors='replace')
+            print(f"[HTTPS]   Body ({len(request.data)}b): {body_preview}")
         return jsonify({"code": 0, "msg": "ok"})
     
     return app
@@ -150,10 +157,10 @@ def run_https_server():
 [HTTPS] Certificate: {cert_file}
     """)
     
-    # Run in production mode (quiet)
+    # Enable verbose logging
     import logging
     log = logging.getLogger('werkzeug')
-    log.setLevel(logging.WARNING)
+    log.setLevel(logging.INFO)  # Show all requests
     
     try:
         app.run(
@@ -170,8 +177,21 @@ def run_https_server():
 
 
 def run_tcp_server():
-    """Run TCP server."""
-    server = TCPServer(TCP_PORT)
+    """Run TCP server with TLS."""
+    # Create SSL context for TCP server (same cert as HTTPS)
+    cert_file, key_file = create_self_signed_cert()
+    ssl_context = None
+    
+    if cert_file and key_file:
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(cert_file, key_file)
+        # Allow older protocols for compatibility
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        print(f"[TCP] TLS enabled with certificate: {cert_file}")
+    else:
+        print("[TCP] WARNING: No certificate, running WITHOUT TLS!")
+    
+    server = TCPServer(TCP_PORT, ssl_context=ssl_context)
     server.start()
 
 

@@ -1,5 +1,5 @@
 📦
-209293 /android/patchers/port_443_12020_redirect_with_logging.js
+245754 /android/patchers/port_443_12020_redirect_with_logging.js
 ✄
 // node_modules/frida-il2cpp-bridge/dist/index.js
 var __decorate = function(decorators, target, key, desc) {
@@ -3412,6 +3412,201 @@ var NativeTlsBypass = class {
     replaceInt0("mbedtls_x509_crt_verify", mbedVerify);
     replaceInt0("mbedtls_x509_crt_verify_with_profile", mbedVerifyProfile);
     replaceInt0("mbedtls_x509_crt_verify_restartable", mbedVerifyRestartable);
+    const boringFunctions = [
+      "ssl_verify_peer_cert",
+      "SSL_do_handshake",
+      "X509_verify_peer_cert_by_callback",
+      "tls13_process_certificate_verify"
+    ];
+    for (const funcName of boringFunctions) {
+      const ptr2 = findExport(funcName);
+      if (ptr2 != null) {
+        if (isDebugging)
+          console.log(`[NativeTlsBypass] Found ${funcName} at ${ptr2}`);
+      }
+    }
+    const modules = Process.enumerateModules();
+    for (const mod of modules) {
+      const name = mod.name.toLowerCase();
+      if (!name.includes("ssl") && !name.includes("crypto") && !name.includes("tls") && !name.includes("boring"))
+        continue;
+      if (isDebugging)
+        console.log(`[NativeTlsBypass] Scanning module: ${mod.name}`);
+      try {
+        const exports = mod.enumerateExports();
+        for (const exp of exports) {
+          const expName = exp.name.toLowerCase();
+          if (expName.includes("verify") && (expName.includes("cert") || expName.includes("peer"))) {
+            if (isDebugging)
+              console.log(`[NativeTlsBypass]   Found: ${exp.name} at ${exp.address}`);
+            if (exp.name === "SSL_get_verify_result" || exp.name === "ssl_verify_peer_cert") {
+              Interceptor.replace(exp.address, new NativeCallback((..._args) => {
+                if (isDebugging)
+                  console.log(`[NativeTlsBypass] ${exp.name}() -> forcing OK`);
+                return 0;
+              }, "long", ["pointer"]));
+            }
+          }
+        }
+      } catch (e) {
+        if (isDebugging)
+          console.log(`[NativeTlsBypass] Error scanning ${mod.name}: ${e}`);
+      }
+    }
+    const hookVerifyCallbackSetters = () => {
+      const modules2 = Process.enumerateModules();
+      for (const mod of modules2) {
+        const name = mod.name.toLowerCase();
+        if (!name.includes("ssl") && !name.includes("crypto") && !name.includes("tls"))
+          continue;
+        const setVerifyPtr = mod.findExportByName("SSL_CTX_set_verify");
+        if (setVerifyPtr) {
+          Interceptor.attach(setVerifyPtr, {
+            onEnter(args) {
+              args[1] = ptr(0);
+              args[2] = ptr(0);
+              if (isDebugging)
+                console.log("[NativeTlsBypass] SSL_CTX_set_verify -> forcing SSL_VERIFY_NONE");
+            }
+          });
+          if (isDebugging)
+            console.log(`[NativeTlsBypass] Hooked SSL_CTX_set_verify in ${mod.name}`);
+        }
+        const setVerifyPtr2 = mod.findExportByName("SSL_set_verify");
+        if (setVerifyPtr2) {
+          Interceptor.attach(setVerifyPtr2, {
+            onEnter(args) {
+              args[1] = ptr(0);
+              args[2] = ptr(0);
+              if (isDebugging)
+                console.log("[NativeTlsBypass] SSL_set_verify -> forcing SSL_VERIFY_NONE");
+            }
+          });
+          if (isDebugging)
+            console.log(`[NativeTlsBypass] Hooked SSL_set_verify in ${mod.name}`);
+        }
+      }
+    };
+    hookVerifyCallbackSetters();
+    setTimeout(hookVerifyCallbackSetters, 2e3);
+  }
+};
+
+// android/patchers/multiple_unpinning.ts
+var FridaMultipleUnpinning = class {
+  static bypass(isDebugging = false) {
+    Java.perform(() => {
+      console.log("");
+      console.log("======");
+      console.log("[#] Android Bypass for various Certificate Pinning methods [#]");
+      console.log("======");
+      var X509TrustManager = Java.use("javax.net.ssl.X509TrustManager");
+      var SSLContext = Java.use("javax.net.ssl.SSLContext");
+      try {
+        var TrustManager = Java.registerClass({
+          // Implement a custom TrustManager
+          name: "dev.asd.test.TrustManager",
+          implements: [X509TrustManager],
+          methods: {
+            checkClientTrusted: (chain, authType) => {
+            },
+            checkServerTrusted: (chain, authType) => {
+            },
+            getAcceptedIssuers: () => []
+          }
+        });
+        var TrustManagers = [TrustManager.$new()];
+        try {
+          var SSLContext_init = SSLContext.init.overload("[Ljavax.net.ssl.KeyManager;", "[Ljavax.net.ssl.TrustManager;", "java.security.SecureRandom");
+          SSLContext_init.implementation = function(keyManager, trustManager, secureRandom) {
+            if (isDebugging)
+              console.log("[+] Bypassing Trustmanager (Android < 7) pinner");
+            SSLContext_init.call(this, keyManager, TrustManagers, secureRandom);
+          };
+        } catch (err) {
+          if (isDebugging)
+            console.log("[-] TrustManager (Android < 7) hook failed");
+        }
+      } catch (err) {
+        console.log(`[#] TrustManager (Android < 7) install failed: ${err}`);
+      }
+      try {
+        var okhttp3_Activity_1 = Java.use("okhttp3.CertificatePinner");
+        okhttp3_Activity_1.check.overload("java.lang.String", "java.util.List").implementation = (a, b) => {
+          if (isDebugging)
+            console.log("[+] Bypassing OkHTTPv3 {1}: " + a);
+          return;
+        };
+      } catch (err) {
+        if (isDebugging)
+          console.log("[-] OkHTTPv3 {1} pinner not found");
+      }
+      try {
+        var okhttp3_Activity_2 = Java.use("okhttp3.CertificatePinner");
+        okhttp3_Activity_2.check.overload("java.lang.String", "java.security.cert.Certificate").implementation = (a, b) => {
+          if (isDebugging)
+            console.log("[+] Bypassing OkHTTPv3 {2}: " + a);
+          return;
+        };
+      } catch (err) {
+        if (isDebugging)
+          console.log("[-] OkHTTPv3 {2} pinner not found");
+      }
+      try {
+        var okhttp3_Activity_3 = Java.use("okhttp3.CertificatePinner");
+        okhttp3_Activity_3.check.overload("java.lang.String", "[Ljava.security.cert.Certificate;").implementation = (a, b) => {
+          if (isDebugging)
+            console.log("[+] Bypassing OkHTTPv3 {3}: " + a);
+          return;
+        };
+      } catch (err) {
+        if (isDebugging)
+          console.log("[-] OkHTTPv3 {3} pinner not found");
+      }
+      try {
+        var okhttp3_Activity_4 = Java.use("okhttp3.CertificatePinner");
+        okhttp3_Activity_4.check$okhttp.overload("java.lang.String", "kotlin.jvm.functions.Function0").implementation = (a, b) => {
+          if (isDebugging)
+            console.log("[+] Bypassing OkHTTPv3 {4}: " + a);
+          return;
+        };
+      } catch (err) {
+        if (isDebugging)
+          console.log("[-] OkHTTPv3 {4} pinner not found");
+      }
+      const patchTrustManagerImpl = (className) => {
+        try {
+          var array_list = Java.use("java.util.ArrayList");
+          const TrustManagerImpl = Java.use(className);
+          if (TrustManagerImpl.checkTrustedRecursive) {
+            TrustManagerImpl.checkTrustedRecursive.implementation = (certs, ocspData, tlsSctData, host, clientAuth, untrustedChain, trustAnchorChain, used) => {
+              if (isDebugging)
+                console.log(`[+] Bypassing ${className} checkTrustedRecursive check: ${host}`);
+              return array_list.$new();
+            };
+          }
+        } catch (err) {
+          if (isDebugging)
+            console.log(`[-] ${className} checkTrustedRecursive hook not available`);
+        }
+        try {
+          const TrustManagerImpl = Java.use(className);
+          if (TrustManagerImpl.verifyChain) {
+            TrustManagerImpl.verifyChain.implementation = (untrustedChain, trustAnchorChain, host, clientAuth, ocspData, tlsSctData) => {
+              if (isDebugging)
+                console.log(`[+] Bypassing ${className} verifyChain check: ${host}`);
+              return untrustedChain;
+            };
+          }
+        } catch (err) {
+          if (isDebugging)
+            console.log(`[-] ${className} verifyChain hook not available`);
+        }
+      };
+      patchTrustManagerImpl("com.android.org.conscrypt.TrustManagerImpl");
+      patchTrustManagerImpl("org.conscrypt.TrustManagerImpl");
+      patchTrustManagerImpl("com.google.android.gms.org.conscrypt.TrustManagerImpl");
+    });
   }
 };
 
@@ -5046,31 +5241,111 @@ var Patcher = class _Patcher {
 // android/patchers/port_443_12020_redirect_with_logging.ts
 console.log("");
 console.log("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557");
-console.log("\u2551   \u{1F3AE} Combined Patcher + Logger (443 + 12020)                  \u2551");
+console.log("\u2551   \u{1F3AE} Combined Port 443 + 12020 Patcher + Logger               \u2551");
 console.log("\u2551   \u25BA Redirects traffic to local server                         \u2551");
-console.log("\u2551   \u25BA Logs packets, TLS, and storage in real-time              \u2551");
+console.log("\u2551   \u25BA Logs TLS, packets, and storage in real-time              \u2551");
 console.log("\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D");
 console.log("");
-var SANDBOX_IP = "10.0.1.9";
-var LOG_STORAGE = true;
-var MAX_CAPTURE_BYTES = 4096;
-var MAX_PREVIEW_LEN = 100;
+var SANDBOX_IP = "10.0.2.2";
 var GAME_DOMAINS = [
   "*.habby.mobi",
+  // Game API (excluding receiver.habby.mobi which is analytics)
   "*.habby.com",
+  // Account services
   "archero*.com"
+  // Any archero domains
 ];
+var DISCOVERY_DURATION_MS = 9e4;
+var MAX_CAPTURE_BYTES = 4096;
+var FILTER_ADS = true;
+var LOG_STORAGE = true;
+var LOG_FILE_IO = false;
+var LOG_FILE_CONTENT = false;
+var MAX_PREVIEW_LEN = 128;
+var INTERESTING_PATHS = [
+  "/data/",
+  "shared_prefs",
+  ".json",
+  ".dat",
+  ".xml",
+  ".bin",
+  ".save",
+  "archero",
+  "habby"
+];
+var IGNORE_PATHS = ["/proc/", "/sys/", "/dev/", "libfrida", ".so", ".dex", ".odex"];
+var GAME_HOSTS = ["habby.mobi", "habby.com", "archero", "archerosvc.com"];
+var AD_HOSTS = [
+  "applovin.com",
+  "facebook.com",
+  "fbcdn.net",
+  "googleadservices.com",
+  "doubleclick.net",
+  "unityads.unity3d.com",
+  "moloco.com",
+  "vungle.com",
+  "mopub.com",
+  "admob",
+  "crashlytics",
+  "fundingchoicesmessages",
+  "app-measurement"
+];
+var ANALYTICS_HOSTS = [
+  "receiver.habby.mobi",
+  "adjust.com",
+  "branch.io",
+  "amplitude.com",
+  "mixpanel.com",
+  "segment.io",
+  "firebase",
+  "fonts.googleapis.com",
+  "fonts.gstatic.com"
+];
+function classifyHost(hostname) {
+  const lower = hostname.toLowerCase();
+  for (const pattern of GAME_HOSTS) {
+    if (lower.includes(pattern)) {
+      if (lower.includes("receiver.habby.mobi"))
+        return "analytics";
+      return "game";
+    }
+  }
+  for (const pattern of ANALYTICS_HOSTS)
+    if (lower.includes(pattern))
+      return "analytics";
+  for (const pattern of AD_HOSTS)
+    if (lower.includes(pattern))
+      return "ads";
+  return "unknown";
+}
+function shouldLogTls(classification) {
+  if (FILTER_ADS && classification === "ads")
+    return false;
+  return true;
+}
+var captures = [];
 var startTime = 0;
-var ipToHostname = /* @__PURE__ */ new Map();
 var fdToAddr = /* @__PURE__ */ new Map();
+var ipToHostname = /* @__PURE__ */ new Map();
+var sslToFd = /* @__PURE__ */ new Map();
+var sslToHostname = /* @__PURE__ */ new Map();
+var pendingSNI = /* @__PURE__ */ new Map();
+var openFds = /* @__PURE__ */ new Map();
+var SSL_get_fd = null;
 var gameServerEndpoint = { host: "unknown", port: 12020 };
 var stats = {
+  tls: { total: 0, game: 0, analytics: 0, ads: 0, unknown: 0, filtered: 0 },
   packets: { sent: 0, received: 0 },
-  storage: { prefs: 0, save: 0, asset: 0 },
-  connections: 0
+  connections: 0,
+  loginSent: false,
+  loginReceived: false,
+  storage: { file: 0, prefs: 0, asset: 0, json: 0, binary: 0, save: 0 }
 };
+var prefsKeys = [];
+var assetBundles = [];
+var saveDataEvents = [];
 function elapsed() {
-  return startTime > 0 ? (Date.now() - startTime) / 1e3 : 0;
+  return (Date.now() - startTime) / 1e3;
 }
 function ts() {
   return `[${elapsed().toFixed(2)}s]`;
@@ -5088,6 +5363,112 @@ function safeString(val) {
 }
 function preview(str, len = MAX_PREVIEW_LEN) {
   return str.length > len ? str.substring(0, len) + "..." : str;
+}
+function isInterestingPath(path) {
+  if (!path)
+    return false;
+  for (const p of IGNORE_PATHS)
+    if (path.includes(p))
+      return false;
+  for (const p of INTERESTING_PATHS)
+    if (path.toLowerCase().includes(p.toLowerCase()))
+      return true;
+  return false;
+}
+function bufferToString(buffer, maxLen = 2048) {
+  const bytes = new Uint8Array(buffer);
+  const length = Math.min(bytes.length, maxLen);
+  let str = "";
+  for (let i = 0; i < length; i++)
+    str += String.fromCharCode(bytes[i]);
+  return str;
+}
+function parseHttpRequest(data) {
+  try {
+    const str = bufferToString(data, 1024);
+    const match = str.match(/^(GET|POST|PUT|DELETE|PATCH)\s+(\S+)\s+HTTP/);
+    if (!match)
+      return null;
+    const ctMatch = str.match(/\r\nContent-Type:\s*([^\r\n]+)/i);
+    return { method: match[1], path: match[2], contentType: ctMatch?.[1] };
+  } catch {
+    return null;
+  }
+}
+function parseHttpResponse(data) {
+  try {
+    const str = bufferToString(data, 1024);
+    const match = str.match(/^HTTP\/[\d.]+\s+(\d+)/);
+    if (!match)
+      return null;
+    const ctMatch = str.match(/\r\nContent-Type:\s*([^\r\n]+)/i);
+    return { statusCode: parseInt(match[1]), contentType: ctMatch?.[1] };
+  } catch {
+    return null;
+  }
+}
+function extractBody(data) {
+  try {
+    const str = bufferToString(data, 4096);
+    const idx = str.indexOf("\r\n\r\n");
+    if (idx < 0)
+      return void 0;
+    const body = str.substring(idx + 4, idx + 4 + 1024);
+    return body.length > 0 ? body : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function extractHostHeader(data) {
+  try {
+    const str = bufferToString(data, 512);
+    const match = str.match(/\r\nHost:\s*([^\r\n:]+)/i);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+function extractSNI(data) {
+  try {
+    const bytes = new Uint8Array(data);
+    if (bytes.length < 6 || bytes[0] !== 22 || bytes[5] !== 1)
+      return null;
+    let pos = 43;
+    if (bytes.length <= pos)
+      return null;
+    const sessionLen = bytes[pos];
+    pos += 1 + sessionLen;
+    if (bytes.length <= pos + 2)
+      return null;
+    const cipherLen = bytes[pos] << 8 | bytes[pos + 1];
+    pos += 2 + cipherLen;
+    if (bytes.length <= pos + 1)
+      return null;
+    const compLen = bytes[pos];
+    pos += 1 + compLen;
+    if (bytes.length <= pos + 2)
+      return null;
+    const extLen = bytes[pos] << 8 | bytes[pos + 1];
+    pos += 2;
+    const extEnd = pos + extLen;
+    while (pos + 4 < extEnd && pos + 4 < bytes.length) {
+      const extType = bytes[pos] << 8 | bytes[pos + 1];
+      const extDataLen = bytes[pos + 2] << 8 | bytes[pos + 3];
+      pos += 4;
+      if (extType === 0 && pos + 5 < bytes.length) {
+        const nameLen = bytes[pos + 3] << 8 | bytes[pos + 4];
+        if (pos + 5 + nameLen <= bytes.length) {
+          let hostname = "";
+          for (let i = 0; i < nameLen; i++)
+            hostname += String.fromCharCode(bytes[pos + 5 + i]);
+          return hostname;
+        }
+      }
+      pos += extDataLen;
+    }
+  } catch {
+  }
+  return null;
 }
 function dumpAllFields(instance, depth = 0) {
   if (depth > 2)
@@ -5175,8 +5556,74 @@ function printFields(fields, indent = "\u2502   ") {
     }
   }
 }
+function getHostForFd(fd) {
+  const addr = fdToAddr.get(fd);
+  if (addr) {
+    const sni = pendingSNI.get(fd);
+    if (sni)
+      return { host: sni, port: addr.port };
+    const dns = ipToHostname.get(addr.ip);
+    if (dns)
+      return { host: dns, port: addr.port };
+    return { host: addr.ip, port: addr.port };
+  }
+  return { host: "unknown", port: 443 };
+}
+function getHostForSSL(ssl, data) {
+  const sslKey = ssl.toString();
+  const cached = sslToHostname.get(sslKey);
+  if (cached) {
+    const fd2 = sslToFd.get(sslKey);
+    return { host: cached, port: fd2 !== void 0 ? fdToAddr.get(fd2)?.port || 443 : 443 };
+  }
+  let fd = sslToFd.get(sslKey) ?? -1;
+  if (fd < 0 && SSL_get_fd) {
+    try {
+      fd = SSL_get_fd(ssl);
+      if (fd >= 0)
+        sslToFd.set(sslKey, fd);
+    } catch {
+    }
+  }
+  if (data) {
+    const sni = extractSNI(data);
+    if (sni) {
+      sslToHostname.set(sslKey, sni);
+      if (fd >= 0) {
+        pendingSNI.set(fd, sni);
+        const addr = fdToAddr.get(fd);
+        if (addr && !ipToHostname.has(addr.ip))
+          ipToHostname.set(addr.ip, sni);
+      }
+      return { host: sni, port: fd >= 0 ? fdToAddr.get(fd)?.port || 443 : 443 };
+    }
+    const host = extractHostHeader(data);
+    if (host) {
+      sslToHostname.set(sslKey, host);
+      if (fd >= 0) {
+        const addr = fdToAddr.get(fd);
+        if (addr && !ipToHostname.has(addr.ip))
+          ipToHostname.set(addr.ip, host);
+      }
+      return { host, port: fd >= 0 ? fdToAddr.get(fd)?.port || 443 : 443 };
+    }
+  }
+  if (fd >= 0)
+    return getHostForFd(fd);
+  return { host: "unknown", port: 443 };
+}
+function logStorage(category, op, target, detail) {
+  if (!LOG_STORAGE)
+    return;
+  const icon = { file: "\u{1F4C2}", prefs: "\u{1F511}", asset: "\u{1F4E6}", json: "\u{1F4CB}", binary: "\u{1F4BE}", save: "\u{1F4BF}" }[category] || "\u{1F4C1}";
+  console.log(`${ts()} [${category.toUpperCase().padEnd(6)}] ${icon} ${op}: ${preview(target, 50)}`);
+  if (detail)
+    console.log(`${ts()}   \u2514\u2500 ${preview(detail, 80)}`);
+  stats.storage[category]++;
+  captures.push({ t: elapsed(), type: "storage", category, op, target: target.substring(0, 200), detail: detail?.substring(0, 100) });
+}
 function hookNativeNetwork() {
-  console.log("[NATIVE] Setting up network logging hooks...");
+  console.log("[NATIVE] Setting up network hooks...");
   const libc = Process.getModuleByName("libc.so");
   try {
     const ptr2 = libc.findExportByName("getaddrinfo");
@@ -5213,12 +5660,82 @@ function hookNativeNetwork() {
                   break;
                 }
               }
+              captures.push({ t: elapsed(), type: "dns", host: hostname });
             }
           } catch {
           }
         }
       });
       console.log("   \u2713 getaddrinfo");
+    }
+  } catch {
+  }
+  try {
+    const ptr2 = libc.findExportByName("gethostbyname");
+    if (ptr2) {
+      Interceptor.attach(ptr2, {
+        onEnter(args) {
+          try {
+            this.hostname = args[0].readUtf8String();
+          } catch {
+            this.hostname = null;
+          }
+        },
+        onLeave(retval) {
+          try {
+            const hostname = this.hostname;
+            if (hostname && !retval.isNull()) {
+              const addrListOffset = Process.pointerSize === 8 ? 24 : 16;
+              const addrList = retval.add(addrListOffset).readPointer();
+              if (!addrList.isNull()) {
+                const addrPtr = addrList.readPointer();
+                if (!addrPtr.isNull()) {
+                  const ip = `${addrPtr.readU8()}.${addrPtr.add(1).readU8()}.${addrPtr.add(2).readU8()}.${addrPtr.add(3).readU8()}`;
+                  ipToHostname.set(ip, hostname);
+                }
+              }
+            }
+          } catch {
+          }
+        }
+      });
+      console.log("   \u2713 gethostbyname");
+    }
+  } catch {
+  }
+  try {
+    const ptr2 = libc.findExportByName("android_getaddrinfofornet");
+    if (ptr2) {
+      Interceptor.attach(ptr2, {
+        onEnter(args) {
+          try {
+            this.hostname = args[0].readUtf8String();
+            this.result = args[3];
+          } catch {
+          }
+        },
+        onLeave(retval) {
+          try {
+            const hostname = this.hostname;
+            const resultPtr = this.result;
+            if (hostname && retval.toInt32() === 0 && resultPtr) {
+              let ai = resultPtr.readPointer();
+              if (!ai.isNull()) {
+                const family = ai.add(4).readS32();
+                if (family === 2) {
+                  const addr = ai.add(Process.pointerSize === 8 ? 24 : 16).readPointer();
+                  if (!addr.isNull()) {
+                    const ip = `${addr.add(4).readU8()}.${addr.add(5).readU8()}.${addr.add(6).readU8()}.${addr.add(7).readU8()}`;
+                    ipToHostname.set(ip, hostname);
+                  }
+                }
+              }
+            }
+          } catch {
+          }
+        }
+      });
+      console.log("   \u2713 android_getaddrinfofornet");
     }
   } catch {
   }
@@ -5239,6 +5756,7 @@ function hookNativeNetwork() {
               if (port === 443 || port === 12020) {
                 stats.connections++;
                 const hostname = ipToHostname.get(ip) || ip;
+                captures.push({ t: elapsed(), type: "connect", ip, port, host: hostname });
                 console.log(`${ts()} [CONNECT] ${hostname}:${port}`);
                 if (port === 12020) {
                   gameServerEndpoint = { host: hostname, port };
@@ -5254,6 +5772,366 @@ function hookNativeNetwork() {
   } catch {
   }
 }
+function hookNativeFileIO() {
+  if (!LOG_FILE_IO)
+    return;
+  console.log("[NATIVE] Setting up file I/O hooks...");
+  try {
+    const libc = Process.getModuleByName("libc.so");
+    try {
+      const openatPtr = libc.findExportByName("openat");
+      if (openatPtr) {
+        Interceptor.attach(openatPtr, {
+          onEnter(args) {
+            try {
+              this.path = args[1].readUtf8String();
+            } catch {
+              this.path = null;
+            }
+          },
+          onLeave(retval) {
+            try {
+              const fd = retval.toInt32();
+              const path = this.path;
+              if (fd >= 0 && path && isInterestingPath(path)) {
+                openFds.set(fd, path);
+                logStorage("file", "openat", path);
+              }
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 openat()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 openat hook failed: ${e}`);
+    }
+    try {
+      const openPtr = libc.findExportByName("open");
+      if (openPtr) {
+        Interceptor.attach(openPtr, {
+          onEnter(args) {
+            try {
+              this.path = args[0].readUtf8String();
+            } catch {
+              this.path = null;
+            }
+          },
+          onLeave(retval) {
+            try {
+              const fd = retval.toInt32();
+              const path = this.path;
+              if (fd >= 0 && path && isInterestingPath(path)) {
+                openFds.set(fd, path);
+                logStorage("file", "open", path);
+              }
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 open()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 open hook failed: ${e}`);
+    }
+    try {
+      const closePtr2 = libc.findExportByName("close");
+      if (closePtr2) {
+        Interceptor.attach(closePtr2, {
+          onEnter(args) {
+            try {
+              this.fd = args[0].toInt32();
+            } catch {
+              this.fd = -1;
+            }
+          },
+          onLeave() {
+            try {
+              openFds.delete(this.fd);
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 close()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 close hook failed: ${e}`);
+    }
+    try {
+      const readPtr2 = libc.findExportByName("read");
+      if (readPtr2) {
+        Interceptor.attach(readPtr2, {
+          onEnter(args) {
+            try {
+              this.fd = args[0].toInt32();
+              this.buf = args[1];
+            } catch {
+              this.fd = -1;
+              this.buf = null;
+            }
+          },
+          onLeave(retval) {
+            try {
+              const fd = this.fd;
+              const bytesRead = retval.toInt32();
+              const path = openFds.get(fd);
+              if (bytesRead > 0 && path) {
+                if (LOG_FILE_CONTENT) {
+                  const previewLen = Math.min(bytesRead, 64);
+                  const data = this.buf.readByteArray(previewLen);
+                  let previewStr = "";
+                  if (data) {
+                    const bytes = new Uint8Array(data);
+                    let isPrintable = true;
+                    for (let i = 0; i < bytes.length && i < 32; i++) {
+                      if (bytes[i] < 32 || bytes[i] > 126) {
+                        isPrintable = false;
+                        break;
+                      }
+                    }
+                    if (isPrintable) {
+                      for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                        previewStr += String.fromCharCode(bytes[i]);
+                      }
+                      if (bytesRead > 48)
+                        previewStr += "...";
+                    } else {
+                      for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                        previewStr += bytes[i].toString(16).padStart(2, "0") + " ";
+                      }
+                      if (bytesRead > 16)
+                        previewStr += "...";
+                    }
+                  }
+                  logStorage("file", "read", path, `${bytesRead}B: ${previewStr}`);
+                } else {
+                  logStorage("file", "read", path, `${bytesRead}B`);
+                }
+              }
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 read()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 read hook failed: ${e}`);
+    }
+    try {
+      const writePtr2 = libc.findExportByName("write");
+      if (writePtr2) {
+        Interceptor.attach(writePtr2, {
+          onEnter(args) {
+            try {
+              const fd = args[0].toInt32();
+              const buf = args[1];
+              const count = args[2].toInt32();
+              const path = openFds.get(fd);
+              if (path && count > 0) {
+                if (LOG_FILE_CONTENT) {
+                  const previewLen = Math.min(count, 64);
+                  const data = buf.readByteArray(previewLen);
+                  let previewStr = "";
+                  if (data) {
+                    const bytes = new Uint8Array(data);
+                    let isPrintable = true;
+                    for (let i = 0; i < bytes.length && i < 32; i++) {
+                      if (bytes[i] < 32 || bytes[i] > 126) {
+                        isPrintable = false;
+                        break;
+                      }
+                    }
+                    if (isPrintable) {
+                      for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                        previewStr += String.fromCharCode(bytes[i]);
+                      }
+                      if (count > 48)
+                        previewStr += "...";
+                    } else {
+                      for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                        previewStr += bytes[i].toString(16).padStart(2, "0") + " ";
+                      }
+                      if (count > 16)
+                        previewStr += "...";
+                    }
+                  }
+                  logStorage("file", "write", path, `${count}B: ${previewStr}`);
+                } else {
+                  logStorage("file", "write", path, `${count}B`);
+                }
+              }
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 write()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 write hook failed: ${e}`);
+    }
+  } catch (e) {
+    console.log(`   \u2717 File I/O hooks failed: ${e}`);
+  }
+}
+function hookTLS() {
+  console.log("[NATIVE] Setting up TLS hooks...");
+  const modules = Process.enumerateModules();
+  const sslModules = modules.filter((mod) => {
+    const name = mod.name.toLowerCase();
+    return name.includes("ssl") || name.includes("crypto");
+  });
+  for (const mod of sslModules) {
+    try {
+      const getFdPtr = mod.findExportByName("SSL_get_fd");
+      if (getFdPtr) {
+        SSL_get_fd = new NativeFunction(getFdPtr, "int", ["pointer"]);
+        console.log("   \u2713 SSL_get_fd");
+      }
+    } catch {
+    }
+    try {
+      const setFdPtr = mod.findExportByName("SSL_set_fd");
+      if (setFdPtr) {
+        Interceptor.attach(setFdPtr, {
+          onEnter(args) {
+            sslToFd.set(args[0].toString(), args[1].toInt32());
+          }
+        });
+        console.log("   \u2713 SSL_set_fd");
+      }
+    } catch {
+    }
+    try {
+      const ctrlPtr = mod.findExportByName("SSL_ctrl");
+      if (ctrlPtr) {
+        Interceptor.attach(ctrlPtr, {
+          onEnter(args) {
+            try {
+              const cmd = args[1].toInt32();
+              if (cmd === 55) {
+                const hostname = args[3].readUtf8String();
+                if (hostname) {
+                  const sslKey = args[0].toString();
+                  sslToHostname.set(sslKey, hostname);
+                  const fd = sslToFd.get(sslKey);
+                  if (fd !== void 0) {
+                    const addr = fdToAddr.get(fd);
+                    if (addr)
+                      ipToHostname.set(addr.ip, hostname);
+                  }
+                }
+              }
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 SSL_ctrl (SNI)");
+      }
+    } catch {
+    }
+    try {
+      const sslRead = mod.findExportByName("SSL_read");
+      if (sslRead) {
+        Interceptor.attach(sslRead, {
+          onEnter(args) {
+            this.ssl = args[0];
+            this.buf = args[1];
+          },
+          onLeave(retval) {
+            const ret = retval.toInt32();
+            if (ret > 0) {
+              const data = this.buf.readByteArray(Math.min(ret, MAX_CAPTURE_BYTES));
+              if (data) {
+                let { host, port } = getHostForSSL(this.ssl);
+                if (host === "unknown") {
+                  const sslKey = this.ssl.toString();
+                  let fd = sslToFd.get(sslKey);
+                  if (fd === void 0 && SSL_get_fd) {
+                    try {
+                      fd = SSL_get_fd(this.ssl);
+                      if (fd >= 0)
+                        sslToFd.set(sslKey, fd);
+                    } catch {
+                    }
+                  }
+                  if (fd !== void 0) {
+                    const addr = fdToAddr.get(fd);
+                    if (addr) {
+                      const cachedHost = ipToHostname.get(addr.ip);
+                      if (cachedHost) {
+                        host = cachedHost;
+                        sslToHostname.set(sslKey, host);
+                      }
+                      port = addr.port;
+                    }
+                  }
+                }
+                const classification = classifyHost(host);
+                stats.tls.total++;
+                stats.tls[classification]++;
+                if (!shouldLogTls(classification)) {
+                  stats.tls.filtered++;
+                  return;
+                }
+                const http = parseHttpResponse(data);
+                const capture = { t: elapsed(), type: "tls", direction: "recv", host, port, classification, bytes: ret, http: http || void 0 };
+                const body = extractBody(data);
+                if (body)
+                  capture.body = body.substring(0, 500);
+                captures.push(capture);
+                console.log(`${ts()} [TLS:RECV] \u2190 ${host}:${port} [${classification.toUpperCase()}] (${ret}B)`);
+                if (http?.statusCode)
+                  console.log(`   HTTP ${http.statusCode}`);
+              }
+            }
+          }
+        });
+        console.log("   \u2713 SSL_read");
+      }
+    } catch {
+    }
+    try {
+      const sslWrite = mod.findExportByName("SSL_write");
+      if (sslWrite) {
+        Interceptor.attach(sslWrite, {
+          onEnter(args) {
+            this.ssl = args[0];
+            this.buf = args[1];
+            this.num = args[2].toInt32();
+          },
+          onLeave(retval) {
+            const ret = retval.toInt32();
+            if (ret > 0) {
+              const data = this.buf.readByteArray(Math.min(ret, MAX_CAPTURE_BYTES));
+              if (data) {
+                const { host, port } = getHostForSSL(this.ssl, data);
+                const classification = classifyHost(host);
+                stats.tls.total++;
+                stats.tls[classification]++;
+                if (!shouldLogTls(classification)) {
+                  stats.tls.filtered++;
+                  return;
+                }
+                const http = parseHttpRequest(data);
+                const capture = { t: elapsed(), type: "tls", direction: "send", host, port, classification, bytes: ret, http: http || void 0 };
+                const body = extractBody(data);
+                if (body)
+                  capture.body = body.substring(0, 500);
+                captures.push(capture);
+                console.log(`${ts()} [TLS:SEND] \u2192 ${host}:${port} [${classification.toUpperCase()}] (${ret}B)`);
+                if (http?.method)
+                  console.log(`   ${http.method} ${http.path}`);
+              }
+            }
+          }
+        });
+        console.log("   \u2713 SSL_write");
+      }
+    } catch {
+    }
+    break;
+  }
+}
 function hookGameProtocol() {
   console.log("[IL2CPP] Waiting for runtime...");
   Il2Cpp.perform(() => {
@@ -5261,17 +6139,73 @@ function hookGameProtocol() {
     console.log(`${ts()} [IL2CPP] Runtime ready, installing hooks...`);
     try {
       const asm = Il2Cpp.domain.assembly("Assembly-CSharp").image;
+      hookLoginPackets(asm);
       hookTcpNetManager(asm);
       hookEncryption(asm);
-      if (LOG_STORAGE)
-        hookStorage(asm);
+      hookStorage(asm);
       console.log(`
-${ts()} [READY] All hooks installed. Logging in real-time...`);
+${ts()} [READY] All hooks installed. Capturing for ${DISCOVERY_DURATION_MS / 1e3}s...`);
       console.log("\u2550".repeat(66));
+      setTimeout(() => printSummary(), DISCOVERY_DURATION_MS);
     } catch (e) {
       console.log(`${ts()} [ERROR] Failed to hook IL2CPP: ${e}`);
     }
   });
+}
+function hookLoginPackets(asm) {
+  console.log(`${ts()} [HOOK] Login packets...`);
+  const packets = [
+    "GameProtocol.CUserLoginPacket",
+    "GameProtocol.CRespUserLoginPacket",
+    "GameProtocol.CHeartBeatPacket",
+    "GameProtocol.CRespHeartBeat"
+  ];
+  for (const packetName of packets) {
+    try {
+      const cls = asm.class(packetName);
+      const shortName = packetName.split(".").pop();
+      try {
+        cls.method("WriteToStream").implementation = function(...args) {
+          console.log(`
+${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+          console.log(`${ts()} \u2502 \u{1F4E4} ${gameServerEndpoint.host}:${gameServerEndpoint.port} \u2190 ${this.class.name}`);
+          console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+          const fields = dumpAllFields(this);
+          printFields(fields);
+          console.log(`${ts()} \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+`);
+          if (this.class.name === "CUserLoginPacket")
+            stats.loginSent = true;
+          stats.packets.sent++;
+          captures.push({ t: elapsed(), type: "packet", direction: "C\u2192S", packetName: this.class.name, fields });
+          return this.method("WriteToStream").invoke(...args);
+        };
+        console.log(`${ts()}   \u2713 ${shortName}.WriteToStream`);
+      } catch {
+      }
+      try {
+        cls.method("ReadFromStream").implementation = function(...args) {
+          const result = this.method("ReadFromStream").invoke(...args);
+          console.log(`
+${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+          console.log(`${ts()} \u2502 \u{1F4E5} ${gameServerEndpoint.host}:${gameServerEndpoint.port} \u2192 ${this.class.name}`);
+          console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+          const fields = dumpAllFields(this);
+          printFields(fields);
+          console.log(`${ts()} \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+`);
+          if (this.class.name === "CRespUserLoginPacket")
+            stats.loginReceived = true;
+          stats.packets.received++;
+          captures.push({ t: elapsed(), type: "packet", direction: "S\u2192C", packetName: this.class.name, fields });
+          return result;
+        };
+        console.log(`${ts()}   \u2713 ${shortName}.ReadFromStream`);
+      } catch {
+      }
+    } catch {
+    }
+  }
 }
 function hookTcpNetManager(asm) {
   console.log(`${ts()} [HOOK] TcpNetManager...`);
@@ -5290,33 +6224,12 @@ ${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         console.log(`${ts()} \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 `);
         stats.packets.sent++;
+        captures.push({ t: elapsed(), type: "packet", direction: "C\u2192S", packetName, fields });
       } catch {
       }
       return this.method("SendPacket").invoke(packet);
     };
     console.log(`${ts()}   \u2713 TcpNetManager.SendPacket`);
-  } catch {
-  }
-  try {
-    const tcpMgr = asm.class("TcpNetManager");
-    tcpMgr.method("HandleMsg").implementation = function(msg) {
-      try {
-        const msgClass = msg.class;
-        const msgName = msgClass.name;
-        console.log(`
-${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
-        console.log(`${ts()} \u2502 \u{1F4E5} ${gameServerEndpoint.host}:${gameServerEndpoint.port} \u2192 ${msgName}`);
-        console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
-        const fields = dumpAllFields(msg);
-        printFields(fields);
-        console.log(`${ts()} \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-`);
-        stats.packets.received++;
-      } catch {
-      }
-      return this.method("HandleMsg").invoke(msg);
-    };
-    console.log(`${ts()}   \u2713 TcpNetManager.HandleMsg`);
   } catch {
   }
 }
@@ -5344,13 +6257,15 @@ function hookEncryption(asm) {
   }
 }
 function hookStorage(asm) {
+  if (!LOG_STORAGE)
+    return;
   console.log(`${ts()} [HOOK] Storage...`);
   try {
     const localSave = asm.class("LocalSave");
     try {
       localSave.method("InitSaveData").implementation = function() {
-        console.log(`${ts()} [SAVE] InitSaveData`);
-        stats.storage.save++;
+        logStorage("save", "InitSaveData", "LocalSave");
+        saveDataEvents.push("InitSaveData");
         return this.method("InitSaveData").invoke();
       };
       console.log(`${ts()}   \u2713 LocalSave.InitSaveData`);
@@ -5358,8 +6273,8 @@ function hookStorage(asm) {
     }
     try {
       localSave.method("SaveDataRefresh").implementation = function() {
-        console.log(`${ts()} [SAVE] SaveDataRefresh`);
-        stats.storage.save++;
+        logStorage("save", "SaveDataRefresh", "LocalSave");
+        saveDataEvents.push("SaveDataRefresh");
         return this.method("SaveDataRefresh").invoke();
       };
       console.log(`${ts()}   \u2713 LocalSave.SaveDataRefresh`);
@@ -5369,16 +6284,31 @@ function hookStorage(asm) {
   }
   try {
     const prefsEncrypt = asm.class("PlayerPrefsEncrypt");
-    const getMethods = ["GetString", "GetInt", "GetBool", "GetLong"];
+    const getMethods = ["GetString", "GetInt", "GetBool", "GetLong", "GetFloat"];
     for (const m of getMethods) {
       try {
         prefsEncrypt.method(m).implementation = function(...args) {
           const key = safeString(args[0]);
           const result = this.method(m).invoke(...args);
           const value = safeString(result);
-          console.log(`${ts()} [PREFS] ${m}(${preview(key, 30)}) = ${preview(value, 50)}`);
-          stats.storage.prefs++;
+          logStorage("prefs", `${m}`, key, value);
+          if (!prefsKeys.includes(key))
+            prefsKeys.push(key);
           return result;
+        };
+      } catch {
+      }
+    }
+    const setMethods = ["SetString", "SetInt", "SetBool", "SetLong", "SetFloat"];
+    for (const m of setMethods) {
+      try {
+        prefsEncrypt.method(m).implementation = function(...args) {
+          const key = safeString(args[0]);
+          const value = args.length > 1 ? safeString(args[1]) : "";
+          logStorage("prefs", `${m}`, key, value);
+          if (!prefsKeys.includes(key))
+            prefsKeys.push(key);
+          return this.method(m).invoke(...args);
         };
       } catch {
       }
@@ -5390,56 +6320,123 @@ function hookStorage(asm) {
     const resourceMgr = asm.class("ResourceManager");
     resourceMgr.method("GetAssetBundle").implementation = function(...args) {
       const name = safeString(args[0]);
-      console.log(`${ts()} [ASSET] GetAssetBundle(${preview(name, 40)})`);
-      stats.storage.asset++;
+      logStorage("asset", "GetAssetBundle", name);
+      if (!assetBundles.includes(name))
+        assetBundles.push(name);
       return this.method("GetAssetBundle").invoke(...args);
     };
     console.log(`${ts()}   \u2713 ResourceManager.GetAssetBundle`);
   } catch {
   }
 }
-function setupSocketPatcher() {
-  console.log("[PATCHER] Setting up socket redirection...");
-  console.log(`[PATCHER] Target: ${SANDBOX_IP}`);
-  NativeTlsBypass.enable(true);
-  Patcher.PatchGetaddrinfoAllowlist([], SANDBOX_IP, false, GAME_DOMAINS);
-  Patcher.ConfigureConnectRedirect({
-    enabled: true,
-    targetIp: SANDBOX_IP,
-    ports: [12020],
-    allowlistHosts: [],
-    allowlistIps: []
+function printSummary() {
+  const totalTime = elapsed();
+  console.log("\n\n");
+  console.log("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557");
+  console.log("\u2551               COMBINED CAPTURE SUMMARY                       \u2551");
+  console.log("\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D");
+  console.log(`
+\u{1F4CA} Statistics:`);
+  console.log(`   Duration: ${totalTime.toFixed(1)}s`);
+  console.log(`   Login sent: ${stats.loginSent ? "\u2713" : "\u2717"} | Login received: ${stats.loginReceived ? "\u2713" : "\u2717"}`);
+  console.log(`   Connections: ${stats.connections}`);
+  console.log(`   TLS: ${stats.tls.total} (game=${stats.tls.game}, analytics=${stats.tls.analytics}, filtered=${stats.tls.filtered})`);
+  console.log(`   Packets: sent=${stats.packets.sent}, received=${stats.packets.received}`);
+  if (LOG_STORAGE) {
+    const storageTotal = Object.values(stats.storage).reduce((a, b) => a + b, 0);
+    console.log(`   Storage: ${storageTotal} (file=${stats.storage.file}, prefs=${stats.storage.prefs}, asset=${stats.storage.asset}, save=${stats.storage.save})`);
+  }
+  console.log(`
+\u{1F4CA} TLS Traffic by Host:`);
+  const hostCounts = /* @__PURE__ */ new Map();
+  captures.filter((c) => c.type === "tls").forEach((c) => {
+    hostCounts.set(c.host, (hostCounts.get(c.host) || 0) + 1);
   });
-  Patcher.ConfigureConnectRedirect({
-    enabled: true,
-    targetIp: SANDBOX_IP,
-    ports: [443],
-    allowlistHosts: GAME_DOMAINS,
-    allowlistIps: []
+  Array.from(hostCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 15).forEach(([host, count]) => console.log(`   ${host}: ${count}`));
+  console.log(`
+\u{1F4CA} Game Packets:`);
+  captures.filter((c) => c.type === "packet").slice(0, 50).forEach((c) => {
+    console.log(`   [${c.t.toFixed(2)}s] ${c.direction} ${c.packetName}`);
   });
-  Patcher.EnableCapture({
-    enabled: true,
-    onlyPatched: true,
-    ports: [12020, 443],
-    maxBytes: MAX_CAPTURE_BYTES,
-    emitConsole: true,
-    decodeEnabled: true,
-    decodePorts: [12020],
-    decodeMaxChunkBytes: 65536,
-    decodeMaxFrameBytes: 256 * 1024,
-    decodeMaxFramesPerSocket: 100,
-    decodeLogPayloadBytes: 256
-  });
-  console.log("[PATCHER] \u2713 Redirection configured");
+  if (LOG_STORAGE && prefsKeys.length > 0) {
+    console.log(`
+\u{1F511} PlayerPrefs Keys (${prefsKeys.length}):`);
+    prefsKeys.slice(0, 10).forEach((k) => console.log(`   - ${k}`));
+    if (prefsKeys.length > 10)
+      console.log(`   ... and ${prefsKeys.length - 10} more`);
+  }
+  console.log(`
+\u{1F4C1} JSON Output (${captures.length} events):`);
+  console.log("=== BEGIN JSON ===");
+  for (const c of captures)
+    console.log(JSON.stringify(c));
+  console.log("=== END JSON ===");
 }
+console.log(`[Patcher] Target Server: ${SANDBOX_IP}`);
+console.log(`[Patcher] Port 12020: ALL traffic redirected`);
+console.log(`[Patcher] Port 443: Only game domains redirected`);
+console.log("");
+console.log("[Patcher] Loading SSL pinning bypass...");
+NativeTlsBypass.enable(true);
+setTimeout(() => {
+  try {
+    FridaMultipleUnpinning.bypass(true);
+    console.log("[Patcher] \u2713 FridaMultipleUnpinning loaded");
+  } catch (e) {
+    console.log("[Patcher] FridaMultipleUnpinning deferred: " + e);
+  }
+}, 1e3);
+Patcher.PatchGetaddrinfoAllowlist(
+  [],
+  // Don't redirect DNS, just watch
+  SANDBOX_IP,
+  false,
+  GAME_DOMAINS
+  // Watch these domains
+);
+Patcher.ConfigureConnectRedirect({
+  enabled: true,
+  targetIp: SANDBOX_IP,
+  ports: [12020],
+  allowlistHosts: [],
+  // No allowlist = redirect all
+  allowlistIps: []
+});
+Patcher.ConfigureConnectRedirect({
+  enabled: true,
+  targetIp: SANDBOX_IP,
+  ports: [443],
+  allowlistHosts: GAME_DOMAINS,
+  allowlistIps: []
+  // Will be populated dynamically from DNS
+});
+Patcher.PatchConnect(SANDBOX_IP, [12020, 443], true);
+Patcher.EnableCapture({
+  enabled: true,
+  onlyPatched: true,
+  ports: [12020, 443],
+  maxBytes: 4096,
+  emitConsole: true,
+  captureSyscalls: false,
+  // ← DISABLED: raw syscall() hooks cause freeze
+  captureReadWrite: false,
+  // ← DISABLED: read/write hooks too heavy
+  decodeEnabled: true,
+  decodePorts: [12020],
+  decodeMaxChunkBytes: 65536,
+  decodeMaxFrameBytes: 256 * 1024,
+  decodeMaxFramesPerSocket: 100,
+  decodeLogPayloadBytes: 256
+});
 hookNativeNetwork();
-setupSocketPatcher();
+hookNativeFileIO();
+hookTLS();
 hookGameProtocol();
 console.log("");
 console.log("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557");
 console.log("\u2551   \u2705 Combined Patcher + Logger Active                         \u2551");
 console.log("\u2551   \u25BA Port 12020: Binary protocol \u2192 Python server               \u2551");
-console.log("\u2551   \u25BA Port 443: Game HTTPS \u2192 Python server                      \u2551");
-console.log("\u2551   \u25BA Real-time logging of packets, TLS, storage                \u2551");
+console.log("\u2551   \u25BA Port 443: Game HTTPS \u2192 Python server (ads bypassed)       \u2551");
+console.log("\u2551   \u25BA Full logging: TLS, packets, storage, encryption           \u2551");
 console.log("\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D");
 console.log("");

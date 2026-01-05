@@ -13,6 +13,7 @@ import struct
 import threading
 import signal
 import sys
+import ssl
 from typing import Optional
 
 from protocol.packet_handler import (
@@ -83,9 +84,12 @@ class GameClient:
             msg_type, payload = parse_packet(data)
             packet_name = get_packet_name(msg_type)
 
+            # Verbose logging with hex preview
+            hex_preview = data[:64].hex() if len(data) >= 64 else data.hex()
             print(
-                f"[TCP][C->S] {packet_name} (0x{msg_type:04X}), payload={len(payload)} bytes"
+                f"[TCP][C→S] {packet_name} (0x{msg_type:04X}), payload={len(payload)} bytes"
             )
+            print(f"[TCP]      Hex: {hex_preview}{'...' if len(data) > 64 else ''}")
 
             # Get response if any
             response = handle_packet(msg_type, payload)
@@ -104,24 +108,27 @@ class GameClient:
         try:
             self.socket.sendall(data)
 
-            # Log what we're sending
+            # Verbose logging with hex preview
             if len(data) >= HEADER_SIZE:
                 msg_type = struct.unpack("<H", data[4:6])[0]
                 packet_name = get_packet_name(msg_type)
+                hex_preview = data[:64].hex() if len(data) >= 64 else data.hex()
                 print(
-                    f"[TCP][S->C] {packet_name} (0x{msg_type:04X}), {len(data)} bytes"
+                    f"[TCP][S→C] {packet_name} (0x{msg_type:04X}), {len(data)} bytes"
                 )
+                print(f"[TCP]      Hex: {hex_preview}{'...' if len(data) > 64 else ''}")
 
         except Exception as e:
             print(f"[TCP] Error sending to {self.address}: {e}")
 
 
 class TCPServer:
-    """TCP server for game protocol"""
+    """TCP server for game protocol with optional TLS support"""
 
-    def __init__(self, port: int = TCP_PORT):
+    def __init__(self, port: int = TCP_PORT, ssl_context: Optional[ssl.SSLContext] = None):
         self.port = port
         self.socket = None
+        self.ssl_context = ssl_context
         self.running = False
         self.clients = []
 
@@ -134,18 +141,33 @@ class TCPServer:
         self.socket.listen(10)
 
         self.running = True
+        tls_status = "🔒 TLS ENABLED" if self.ssl_context else "⚠️  NO TLS"
         print(f"""
 ╔═══════════════════════════════════════════════════════════╗
 ║           🎮 Archero TCP Server - Port {self.port}           ║
+║           {tls_status:^41}   ║
 ╚═══════════════════════════════════════════════════════════╝
 
 [TCP] Server listening on 0.0.0.0:{self.port}
+[TCP] TLS: {"Enabled" if self.ssl_context else "Disabled"}
 [TCP] Waiting for game client connections...
         """)
 
         try:
             while self.running:
                 client_socket, address = self.socket.accept()
+
+                # Wrap with TLS if context provided
+                if self.ssl_context:
+                    try:
+                        client_socket = self.ssl_context.wrap_socket(
+                            client_socket, server_side=True
+                        )
+                        print(f"[TCP] TLS handshake completed with {address}")
+                    except ssl.SSLError as e:
+                        print(f"[TCP] TLS handshake failed with {address}: {e}")
+                        client_socket.close()
+                        continue
 
                 client = GameClient(client_socket, address)
                 self.clients.append(client)

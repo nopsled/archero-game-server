@@ -19,14 +19,14 @@ import "frida-il2cpp-bridge";
 
 console.log("╔══════════════════════════════════════════════════════════════╗");
 console.log("║     ARCHERO AUTH FLOW DISCOVERY (Android - Enhanced)        ║");
-console.log("║     Capturing first 30 seconds of startup                   ║");
+console.log("║     Capturing first 90 seconds of startup                   ║");
 console.log("╚══════════════════════════════════════════════════════════════╝");
 
 // =============================================================================
 // CONFIGURATION
 // =============================================================================
 
-const DISCOVERY_DURATION_MS = 30000;
+const DISCOVERY_DURATION_MS = 90000;
 const VERBOSE_BINARY_OPS = false;
 const LOG_SSL_DATA = true;
 
@@ -267,9 +267,12 @@ function printFields(fields: Record<string, any>, indent: string = "│   "): vo
 function hookNativeNetwork(): void {
   console.log("[NATIVE] Setting up DNS/Socket hooks...");
 
+  const libc = Process.getModuleByName("libc.so");
+  console.log(`[NATIVE] libc.so found at ${libc.base}`);
+
   try {
     // Hook getaddrinfo for DNS
-    const getaddrinfoPtr = Module.findExportByName(null, "getaddrinfo");
+    const getaddrinfoPtr = Module.findExportByName("libc.so", "getaddrinfo");
     if (getaddrinfoPtr) {
       Interceptor.attach(getaddrinfoPtr, {
         onEnter(args) {
@@ -292,14 +295,17 @@ function hookNativeNetwork(): void {
         },
       });
       console.log("   ✓ getaddrinfo hooked");
+    } else {
+      console.log("   ✗ getaddrinfo not found in libc.so");
     }
 
     // Hook connect() for TCP connections
-    const connectPtr = Module.findExportByName(null, "connect");
+    const connectPtr = Module.findExportByName("libc.so", "connect");
     if (connectPtr) {
       Interceptor.attach(connectPtr, {
         onEnter(args) {
           try {
+            const fd = args[0].toInt32();
             const sockaddr = args[1];
             const family = sockaddr.readU16();
 
@@ -309,16 +315,19 @@ function hookNativeNetwork(): void {
               const port = ((portBE & 0xff) << 8) | ((portBE >> 8) & 0xff);
               const ip = `${sockaddr.add(4).readU8()}.${sockaddr.add(5).readU8()}.${sockaddr.add(6).readU8()}.${sockaddr.add(7).readU8()}`;
 
-              if (port === 443 || port === 12020 || port === 80 || port === 8080) {
-                console.log(`${ts()} [CONNECT] ${ip}:${port}`);
+              // Log ALL connections to debug
+              console.log(`${ts()} [CONNECT] fd=${fd} ${ip}:${port}`);
+              if (port === 443 || port === 12020) {
                 connections.push({ ip, port, t: elapsed() });
-                logEvent({ t: elapsed(), phase: "connect", data: { ip, port } });
+                logEvent({ t: elapsed(), phase: "connect", data: { ip, port, fd } });
               }
             }
           } catch (e) {}
         },
       });
       console.log("   ✓ connect hooked");
+    } else {
+      console.log("   ✗ connect not found in libc.so");
     }
   } catch (e) {
     console.log(`   ✗ Native network hooks failed: ${e}`);
@@ -330,44 +339,92 @@ function hookNativeNetwork(): void {
 // =============================================================================
 
 function hookSockets(): void {
-  console.log("[NATIVE] Setting up socket send/recv hooks...");
+  console.log("[NATIVE] Setting up socket send/recv/sendto/recvfrom hooks...");
 
   try {
-    const sendPtr = Module.findExportByName(null, "send");
-    if (sendPtr) {
-      Interceptor.attach(sendPtr, {
+    const hookSend = (name: string, ptr: NativePointer) => {
+      Interceptor.attach(ptr, {
         onEnter(args) {
           const fd = args[0].toInt32();
-          const socktype = Socket.type(fd);
+            // We'll log all, ignoring socktype check which might fail
+            const data = args[1];
+            const size = args[2].toInt32();
 
-          if (socktype !== "tcp" && socktype !== "tcp6") return;
+            if (size > 0 && size < 10000) {
+                  let protocol = "unknown";
+                  try {
+                      const b0 = data.readU8();
+                      const b1 = data.add(1).readU8();
+                      const b2 = data.add(2).readU8();
 
-          const address = Socket.peerAddress(fd);
-          if (address === null) return;
+                      if (b0 === 0x16 && b1 === 0x03) {
+                        const tlsVersion = b2 === 0x01 ? "TLS 1.0" :
+                          b2 === 0x02 ? "TLS 1.1" :
+                            b2 === 0x03 ? "TLS 1.2" :
+                              b2 === 0x04 ? "TLS 1.3" : `TLS (0x03${b2.toString(16).padStart(2, "0")})`;
+                        protocol = `🔒 ${tlsVersion} HANDSHAKE`;
+                      } else if (b0 === 0x17 && b1 === 0x03) {
+                        protocol = "🔐 TLS Application Data";
+                      } else if (b0 === 0x15 && b1 === 0x03) {
+                        protocol = "⚠️ TLS Alert";
+                      } else if (b0 === 0x14 && b1 === 0x03) {
+                        protocol = "🔄 TLS Change Cipher Spec";
+                      } else if (b0 === 0x47 && b1 === 0x45 && b2 === 0x54) {
+                        protocol = "📄 HTTP GET";
+                      } else if (b0 === 0x50 && b1 === 0x4F && b2 === 0x53) {
+                        protocol = "📄 HTTP POST";
+                      }
+                    } catch (e) { }
 
-          const data = args[1];
-          const size = args[2].toInt32();
-
-          if (size > 0 && size < 10000) {
-            console.log(`${ts()} [SOCKET:send] → ${JSON.stringify(address)} (${size} bytes)`);
-            try {
-              const buffer = data.readByteArray(Math.min(size, 256));
-              if (buffer) {
-                console.log(
-                  hexdump(buffer, {
-                    offset: 0,
-                    length: Math.min(size, 256),
-                    header: false,
-                    ansi: true,
-                  })
-                );
-              }
-            } catch (e) {}
+                  if (protocol !== "unknown" || size > 16) {
+                    try {
+                      const addr = Socket.peerAddress(fd);
+                      console.log(`${ts()} [SOCKET:${name}] fd=${fd} ${addr ? JSON.stringify(addr) : "?"} (${size} bytes) ${protocol}`);
+                      if (protocol.includes("HANDSHAKE")) console.log(hexdump(data, { length: Math.min(size, 128) }));
+                    } catch (e) { }
+                  }
+                }
           }
-        },
-      });
-      console.log("   ✓ send hooked");
-    }
+        });
+    };
+
+    const sendPtr = Module.findExportByName("libc.so", "send");
+    if (sendPtr) hookSend("send", sendPtr);
+
+    const sendtoPtr = Module.findExportByName("libc.so", "sendto");
+    if (sendtoPtr) hookSend("sendto", sendtoPtr);
+
+    console.log("   ✓ send/sendto hooked");
+
+    const hookRecv = (name: string, ptr: NativePointer) => {
+      Interceptor.attach(ptr, {
+        onEnter(args) {
+          this.fd = args[0].toInt32();
+          this.buf = args[1];
+          },
+          onLeave(retval) {
+            const bytesRead = retval.toInt32();
+            if (bytesRead <= 0) return;
+
+            try {
+              const b0 = this.buf.readU8();
+              if (b0 === 0x16) { // TLS Handshake
+                console.log(`${ts()} [SOCKET:${name}] fd=${this.fd} TLS HANDSHAKE IN (${bytesRead} bytes)`);
+                console.log(hexdump(this.buf, { length: Math.min(bytesRead, 128) }));
+              }
+            } catch (e) { }
+          }
+        });
+    };
+
+    const recvPtr = Module.findExportByName("libc.so", "recv");
+    if (recvPtr) hookRecv("recv", recvPtr);
+
+    const recvfromPtr = Module.findExportByName("libc.so", "recvfrom");
+    if (recvfromPtr) hookRecv("recvfrom", recvfromPtr);
+
+    console.log("   ✓ recv/recvfrom hooked");
+
   } catch (e) {
     console.log(`   ✗ Socket hooks failed: ${e}`);
   }
@@ -780,21 +837,19 @@ function hookEncryption(asm: Il2Cpp.Image): void {
     const rc4 = asm.class("RC4Encrypter");
 
     try {
-      rc4.method("Encrypt").implementation = function (data: any, key: any) {
-        const keyStr = safeString(key);
-        const result = this.method("Encrypt").invoke(data, key);
+      // Encrypt only takes 1 parameter (data) - key is stored from constructor
+      rc4.method("Encrypt").implementation = function (data: any) {
+        const result = this.method("Encrypt").invoke(data);
+        const dataLen = data?.length || "?";
 
-        console.log(`${ts()} [CRYPTO] RC4Encrypter.Encrypt`);
-        console.log(`${ts()}   KEY: ${keyStr.substring(0, 32)}${keyStr.length > 32 ? "..." : ""}`);
-
-        encryptionKeys.push({ t: elapsed(), type: "RC4", key: keyStr });
+        console.log(`${ts()} [CRYPTO] RC4Encrypter.Encrypt (${dataLen} bytes)`);
 
         logEvent({
           t: elapsed(),
           phase: "crypto",
           class: "RC4Encrypter",
           method: "Encrypt",
-          data: { keyPreview: keyStr.substring(0, 32) },
+          data: { length: dataLen },
         });
 
         return result;
@@ -830,11 +885,14 @@ function hookHttpLayer(): void {
     const httpManager = habbyToolAsm.class("Habby.Tool.Http.HttpManager");
 
     httpManager.methods.forEach((method) => {
+      // Exclude Update, Kill, etc.
       if (
-        method.name.includes("Request") ||
+        (method.name.includes("Request") ||
         method.name.includes("Send") ||
         method.name.includes("Post") ||
-        method.name.includes("Get")
+          method.name.includes("Get")) &&
+        !method.name.includes("Update") &&
+        !method.name.includes("Kill")
       ) {
         try {
           httpManager.method(method.name).implementation = function (...args: any[]) {
@@ -865,10 +923,19 @@ function hookHttpLayer(): void {
     try {
       const httpClient = asm.class("HTTPSendClient");
       httpClient.methods.forEach((method) => {
-        if (method.name.includes("Send") || method.name.includes("Request")) {
+        if (
+          (method.name.includes("Send") || method.name.includes("Request")) &&
+          !method.name.includes("Kill") &&
+          !method.name.includes("Update")
+        ) {
           try {
             httpClient.method(method.name).implementation = function (...args: any[]) {
-              const argStrs = args.map((a) => safeString(a));
+              // Try to print args but capture errors to avoid crash
+              let argStrs: string[] = [];
+              try {
+                argStrs = args.map((a) => safeString(a));
+              } catch (e) { argStrs = ["<formatting error>"]; }
+
               console.log(
                 `${ts()} [HTTP] HTTPSendClient.${method.name}(${argStrs.join(", ").substring(0, 100)})`
               );
