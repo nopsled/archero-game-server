@@ -30,7 +30,8 @@ const DISCOVERY_DURATION_MS = 90000;
 const MAX_CAPTURE_BYTES = 4096;
 const FILTER_ADS = true;
 const LOG_STORAGE = true;
-const LOG_FILE_IO = true;
+const LOG_FILE_IO = false;
+const LOG_FILE_CONTENT = false; // Set to true to show file read/write content
 const MAX_PREVIEW_LEN = 128;
 
 // Storage paths to capture
@@ -128,6 +129,9 @@ const sslToHostname = new Map<string, string>();
 const pendingSNI = new Map<number, string>();
 const openFds = new Map<number, string>(); // fd -> file path
 let SSL_get_fd: NativeFunction<number, [NativePointer]> | null = null;
+
+// Game server endpoint tracking (port 12020)
+let gameServerEndpoint = { host: "unknown", port: 12020 };
 
 // Stats
 const stats = {
@@ -520,6 +524,11 @@ function hookNativeNetwork(): void {
                                 const hostname = ipToHostname.get(ip) || ip;
                                 captures.push({ t: elapsed(), type: "connect", ip, port, host: hostname });
                                 console.log(`${ts()} [CONNECT] ${hostname}:${port}`);
+
+                                // Track game server endpoint for packet logging
+                                if (port === 12020) {
+                                    gameServerEndpoint = { host: hostname, port };
+                                }
                             }
                         }
                     } catch { }
@@ -634,29 +643,32 @@ function hookNativeFileIO(): void {
                             const bytesRead = retval.toInt32();
                             const path = openFds.get(fd);
                             if (bytesRead > 0 && path) {
-                                const previewLen = Math.min(bytesRead, 64);
-                                const data = (this as any).buf.readByteArray(previewLen);
-                                let preview = "";
-                                if (data) {
-                                    const bytes = new Uint8Array(data);
-                                    // Try to read as string if printable
-                                    let isPrintable = true;
-                                    for (let i = 0; i < bytes.length && i < 32; i++) {
-                                        if (bytes[i] < 32 || bytes[i] > 126) { isPrintable = false; break; }
-                                    }
-                                    if (isPrintable) {
-                                        for (let i = 0; i < Math.min(bytes.length, 48); i++) {
-                                            preview += String.fromCharCode(bytes[i]);
+                                if (LOG_FILE_CONTENT) {
+                                    const previewLen = Math.min(bytesRead, 64);
+                                    const data = (this as any).buf.readByteArray(previewLen);
+                                    let preview = "";
+                                    if (data) {
+                                        const bytes = new Uint8Array(data);
+                                        let isPrintable = true;
+                                        for (let i = 0; i < bytes.length && i < 32; i++) {
+                                            if (bytes[i] < 32 || bytes[i] > 126) { isPrintable = false; break; }
                                         }
-                                        if (bytesRead > 48) preview += "...";
-                                    } else {
-                                        for (let i = 0; i < Math.min(bytes.length, 16); i++) {
-                                            preview += bytes[i].toString(16).padStart(2, "0") + " ";
+                                        if (isPrintable) {
+                                            for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                                                preview += String.fromCharCode(bytes[i]);
+                                            }
+                                            if (bytesRead > 48) preview += "...";
+                                        } else {
+                                            for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                                                preview += bytes[i].toString(16).padStart(2, "0") + " ";
+                                            }
+                                            if (bytesRead > 16) preview += "...";
                                         }
-                                        if (bytesRead > 16) preview += "...";
                                     }
+                                    logStorage("file", "read", path, `${bytesRead}B: ${preview}`);
+                                } else {
+                                    logStorage("file", "read", path, `${bytesRead}B`);
                                 }
-                                logStorage("file", "read", path, `${bytesRead}B: ${preview}`);
                             }
                         } catch { }
                     },
@@ -679,29 +691,32 @@ function hookNativeFileIO(): void {
                             const count = args[2].toInt32();
                             const path = openFds.get(fd);
                             if (path && count > 0) {
-                                const previewLen = Math.min(count, 64);
-                                const data = buf.readByteArray(previewLen);
-                                let preview = "";
-                                if (data) {
-                                    const bytes = new Uint8Array(data);
-                                    // Try to read as string if printable
-                                    let isPrintable = true;
-                                    for (let i = 0; i < bytes.length && i < 32; i++) {
-                                        if (bytes[i] < 32 || bytes[i] > 126) { isPrintable = false; break; }
-                                    }
-                                    if (isPrintable) {
-                                        for (let i = 0; i < Math.min(bytes.length, 48); i++) {
-                                            preview += String.fromCharCode(bytes[i]);
+                                if (LOG_FILE_CONTENT) {
+                                    const previewLen = Math.min(count, 64);
+                                    const data = buf.readByteArray(previewLen);
+                                    let preview = "";
+                                    if (data) {
+                                        const bytes = new Uint8Array(data);
+                                        let isPrintable = true;
+                                        for (let i = 0; i < bytes.length && i < 32; i++) {
+                                            if (bytes[i] < 32 || bytes[i] > 126) { isPrintable = false; break; }
                                         }
-                                        if (count > 48) preview += "...";
-                                    } else {
-                                        for (let i = 0; i < Math.min(bytes.length, 16); i++) {
-                                            preview += bytes[i].toString(16).padStart(2, "0") + " ";
+                                        if (isPrintable) {
+                                            for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                                                preview += String.fromCharCode(bytes[i]);
+                                            }
+                                            if (count > 48) preview += "...";
+                                        } else {
+                                            for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                                                preview += bytes[i].toString(16).padStart(2, "0") + " ";
+                                            }
+                                            if (count > 16) preview += "...";
                                         }
-                                        if (count > 16) preview += "...";
                                     }
+                                    logStorage("file", "write", path, `${count}B: ${preview}`);
+                                } else {
+                                    logStorage("file", "write", path, `${count}B`);
                                 }
-                                logStorage("file", "write", path, `${count}B: ${preview}`);
                             }
                         } catch { }
                     },
@@ -903,9 +918,9 @@ function hookLoginPackets(asm: Il2Cpp.Image): void {
 
             try {
                 cls.method("WriteToStream").implementation = function (...args: any[]) {
-                    console.log(`\n${ts()} ┌───────────────────────────────────────────`);
-                    console.log(`${ts()} │ 📤 PACKET OUT: ${(this as any).class.name}`);
-                    console.log(`${ts()} ├───────────────────────────────────────────`);
+                    console.log(`\n${ts()} ┌────────────────────────────────────────────────────────────`);
+                    console.log(`${ts()} │ 📤 ${gameServerEndpoint.host}:${gameServerEndpoint.port} ← ${(this as any).class.name}`);
+                    console.log(`${ts()} ├────────────────────────────────────────────────────────────`);
 
                     const fields = dumpAllFields(this);
                     printFields(fields);
@@ -924,9 +939,9 @@ function hookLoginPackets(asm: Il2Cpp.Image): void {
                 cls.method("ReadFromStream").implementation = function (...args: any[]) {
                     const result = this.method("ReadFromStream").invoke(...args);
 
-                    console.log(`\n${ts()} ┌───────────────────────────────────────────`);
-                    console.log(`${ts()} │ 📥 PACKET IN: ${(this as any).class.name}`);
-                    console.log(`${ts()} ├───────────────────────────────────────────`);
+                    console.log(`\n${ts()} ┌────────────────────────────────────────────────────────────`);
+                    console.log(`${ts()} │ 📥 ${gameServerEndpoint.host}:${gameServerEndpoint.port} → ${(this as any).class.name}`);
+                    console.log(`${ts()} ├────────────────────────────────────────────────────────────`);
 
                     const fields = dumpAllFields(this);
                     printFields(fields);
@@ -954,9 +969,9 @@ function hookTcpNetManager(asm: Il2Cpp.Image): void {
                 const packetClass = packet.class;
                 const packetName = packetClass.name;
 
-                console.log(`\n${ts()} ┌───────────────────────────────────────────`);
-                console.log(`${ts()} │ 📤 PACKET OUT: ${packetName}`);
-                console.log(`${ts()} ├───────────────────────────────────────────`);
+                console.log(`\n${ts()} ┌────────────────────────────────────────────────────────────`);
+                console.log(`${ts()} │ 📤 ${gameServerEndpoint.host}:${gameServerEndpoint.port} ← ${packetName}`);
+                console.log(`${ts()} ├────────────────────────────────────────────────────────────`);
 
                 const fields = dumpAllFields(packet);
                 printFields(fields);

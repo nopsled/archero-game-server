@@ -15,7 +15,7 @@ import { FridaMultipleUnpinning } from "./multiple_unpinning";
 import { Patcher } from "./core/socket_patcher";
 
 // ============= CONFIGURATION =============
-const SANDBOX_IP = "10.0.1.22"; // Your local network IP running the Python server
+const SANDBOX_IP = "10.0.1.9"; // Host machine IP (MuMuPlayer Pro uses bridge networking)
 
 // Game-relevant domains to redirect (excludes ads, analytics, CDNs)
 const GAME_DOMAINS = [

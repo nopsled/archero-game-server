@@ -1,5 +1,5 @@
 📦
-163704 /android/loggers/port_443_12020_storage_logger.js
+165084 /android/loggers/port_443_12020_storage_logger.js
 ✄
 // node_modules/frida-il2cpp-bridge/dist/index.js
 var __decorate = function(decorators, target, key, desc) {
@@ -3327,7 +3327,8 @@ var DISCOVERY_DURATION_MS = 9e4;
 var MAX_CAPTURE_BYTES = 4096;
 var FILTER_ADS = true;
 var LOG_STORAGE = true;
-var LOG_FILE_IO = true;
+var LOG_FILE_IO = false;
+var LOG_FILE_CONTENT = false;
 var MAX_PREVIEW_LEN = 128;
 var INTERESTING_PATHS = [
   "/data/",
@@ -3399,6 +3400,7 @@ var sslToHostname = /* @__PURE__ */ new Map();
 var pendingSNI = /* @__PURE__ */ new Map();
 var openFds = /* @__PURE__ */ new Map();
 var SSL_get_fd = null;
+var gameServerEndpoint = { host: "unknown", port: 12020 };
 var stats = {
   tls: { total: 0, game: 0, analytics: 0, ads: 0, unknown: 0, filtered: 0 },
   packets: { sent: 0, received: 0 },
@@ -3824,6 +3826,9 @@ function hookNativeNetwork() {
                 const hostname = ipToHostname.get(ip) || ip;
                 captures.push({ t: elapsed(), type: "connect", ip, port, host: hostname });
                 console.log(`${ts()} [CONNECT] ${hostname}:${port}`);
+                if (port === 12020) {
+                  gameServerEndpoint = { host: hostname, port };
+                }
               }
             }
           } catch {
@@ -3939,33 +3944,37 @@ function hookNativeFileIO() {
               const bytesRead = retval.toInt32();
               const path = openFds.get(fd);
               if (bytesRead > 0 && path) {
-                const previewLen = Math.min(bytesRead, 64);
-                const data = this.buf.readByteArray(previewLen);
-                let preview2 = "";
-                if (data) {
-                  const bytes = new Uint8Array(data);
-                  let isPrintable = true;
-                  for (let i = 0; i < bytes.length && i < 32; i++) {
-                    if (bytes[i] < 32 || bytes[i] > 126) {
-                      isPrintable = false;
-                      break;
+                if (LOG_FILE_CONTENT) {
+                  const previewLen = Math.min(bytesRead, 64);
+                  const data = this.buf.readByteArray(previewLen);
+                  let preview2 = "";
+                  if (data) {
+                    const bytes = new Uint8Array(data);
+                    let isPrintable = true;
+                    for (let i = 0; i < bytes.length && i < 32; i++) {
+                      if (bytes[i] < 32 || bytes[i] > 126) {
+                        isPrintable = false;
+                        break;
+                      }
+                    }
+                    if (isPrintable) {
+                      for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                        preview2 += String.fromCharCode(bytes[i]);
+                      }
+                      if (bytesRead > 48)
+                        preview2 += "...";
+                    } else {
+                      for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                        preview2 += bytes[i].toString(16).padStart(2, "0") + " ";
+                      }
+                      if (bytesRead > 16)
+                        preview2 += "...";
                     }
                   }
-                  if (isPrintable) {
-                    for (let i = 0; i < Math.min(bytes.length, 48); i++) {
-                      preview2 += String.fromCharCode(bytes[i]);
-                    }
-                    if (bytesRead > 48)
-                      preview2 += "...";
-                  } else {
-                    for (let i = 0; i < Math.min(bytes.length, 16); i++) {
-                      preview2 += bytes[i].toString(16).padStart(2, "0") + " ";
-                    }
-                    if (bytesRead > 16)
-                      preview2 += "...";
-                  }
+                  logStorage("file", "read", path, `${bytesRead}B: ${preview2}`);
+                } else {
+                  logStorage("file", "read", path, `${bytesRead}B`);
                 }
-                logStorage("file", "read", path, `${bytesRead}B: ${preview2}`);
               }
             } catch {
             }
@@ -3987,33 +3996,37 @@ function hookNativeFileIO() {
               const count = args[2].toInt32();
               const path = openFds.get(fd);
               if (path && count > 0) {
-                const previewLen = Math.min(count, 64);
-                const data = buf.readByteArray(previewLen);
-                let preview2 = "";
-                if (data) {
-                  const bytes = new Uint8Array(data);
-                  let isPrintable = true;
-                  for (let i = 0; i < bytes.length && i < 32; i++) {
-                    if (bytes[i] < 32 || bytes[i] > 126) {
-                      isPrintable = false;
-                      break;
+                if (LOG_FILE_CONTENT) {
+                  const previewLen = Math.min(count, 64);
+                  const data = buf.readByteArray(previewLen);
+                  let preview2 = "";
+                  if (data) {
+                    const bytes = new Uint8Array(data);
+                    let isPrintable = true;
+                    for (let i = 0; i < bytes.length && i < 32; i++) {
+                      if (bytes[i] < 32 || bytes[i] > 126) {
+                        isPrintable = false;
+                        break;
+                      }
+                    }
+                    if (isPrintable) {
+                      for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                        preview2 += String.fromCharCode(bytes[i]);
+                      }
+                      if (count > 48)
+                        preview2 += "...";
+                    } else {
+                      for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                        preview2 += bytes[i].toString(16).padStart(2, "0") + " ";
+                      }
+                      if (count > 16)
+                        preview2 += "...";
                     }
                   }
-                  if (isPrintable) {
-                    for (let i = 0; i < Math.min(bytes.length, 48); i++) {
-                      preview2 += String.fromCharCode(bytes[i]);
-                    }
-                    if (count > 48)
-                      preview2 += "...";
-                  } else {
-                    for (let i = 0; i < Math.min(bytes.length, 16); i++) {
-                      preview2 += bytes[i].toString(16).padStart(2, "0") + " ";
-                    }
-                    if (count > 16)
-                      preview2 += "...";
-                  }
+                  logStorage("file", "write", path, `${count}B: ${preview2}`);
+                } else {
+                  logStorage("file", "write", path, `${count}B`);
                 }
-                logStorage("file", "write", path, `${count}B: ${preview2}`);
               }
             } catch {
             }
@@ -4222,9 +4235,9 @@ function hookLoginPackets(asm) {
       try {
         cls.method("WriteToStream").implementation = function(...args) {
           console.log(`
-${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
-          console.log(`${ts()} \u2502 \u{1F4E4} PACKET OUT: ${this.class.name}`);
-          console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+          console.log(`${ts()} \u2502 \u{1F4E4} ${gameServerEndpoint.host}:${gameServerEndpoint.port} \u2190 ${this.class.name}`);
+          console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
           const fields = dumpAllFields(this);
           printFields(fields);
           console.log(`${ts()} \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -4242,9 +4255,9 @@ ${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         cls.method("ReadFromStream").implementation = function(...args) {
           const result = this.method("ReadFromStream").invoke(...args);
           console.log(`
-${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
-          console.log(`${ts()} \u2502 \u{1F4E5} PACKET IN: ${this.class.name}`);
-          console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+          console.log(`${ts()} \u2502 \u{1F4E5} ${gameServerEndpoint.host}:${gameServerEndpoint.port} \u2192 ${this.class.name}`);
+          console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
           const fields = dumpAllFields(this);
           printFields(fields);
           console.log(`${ts()} \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -4271,9 +4284,9 @@ function hookTcpNetManager(asm) {
         const packetClass = packet.class;
         const packetName = packetClass.name;
         console.log(`
-${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
-        console.log(`${ts()} \u2502 \u{1F4E4} PACKET OUT: ${packetName}`);
-        console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+${ts()} \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+        console.log(`${ts()} \u2502 \u{1F4E4} ${gameServerEndpoint.host}:${gameServerEndpoint.port} \u2190 ${packetName}`);
+        console.log(`${ts()} \u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
         const fields = dumpAllFields(packet);
         printFields(fields);
         console.log(`${ts()} \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500

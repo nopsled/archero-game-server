@@ -1,5 +1,5 @@
 📦
-78109 /android/patchers/port_443_12020_redirect.js
+78108 /android/patchers/port_443_12020_redirect.js
 ✄
 // android/patchers/native_tls_bypass.ts
 function findExport(exportName) {
@@ -1845,7 +1845,7 @@ var Patcher = class _Patcher {
 };
 
 // android/patchers/port_443_12020_redirect.ts
-var SANDBOX_IP = "10.0.1.22";
+var SANDBOX_IP = "10.0.1.9";
 var GAME_DOMAINS = [
   "*.habby.mobi",
   // Game API (excluding receiver.habby.mobi which is analytics)
