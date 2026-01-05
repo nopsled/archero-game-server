@@ -340,17 +340,18 @@ def write_c_resp_user_login_packet(
 
 
 def create_default_login_response(trans_id: int) -> CRespUserLoginPacket:
-    """Create a default login response for new players"""
+    """Create a default login response matching real server values"""
     now = int(time.time())
     today_end = now + (86400 - (now % 86400))
 
     return CRespUserLoginPacket(
         m_nTransID=trans_id,
-        m_nCoins=1,
-        m_nDiamonds=1,
-        m_nLevel=30,
+        # Real server values from logs
+        m_nCoins=199,
+        m_nDiamonds=100,
+        m_nLevel=1,
         m_nExperince=0,
-        m_nUserRawId=72276397022577740,  # Random large ID
+        m_nUserRawId=72453418394682577,  # From real server
         m_nNowTime=now,
         m_nTodayEndTimestamp=today_end,
         m_nMaxLayer=0,
@@ -416,7 +417,7 @@ def create_default_login_response(trans_id: int) -> CRespUserLoginPacket:
         m_nGuildStopTimestamp=0,
         m_nStarDiamond=0,
         m_nExperinceInt64=0,
-        m_nCoinsInt64=1,
+        m_nCoinsInt64=199,
         m_nImprintBoxKeyCount=0,
         m_nMaxHellLayer=0,
         m_nHellLayerBoxID=0,

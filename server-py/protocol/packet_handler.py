@@ -244,7 +244,7 @@ def handle_activity_common(payload: bytes) -> bytes:
 
 
 # =============================================================================
-# PACKET NAMES FOR LOGGING
+# PACKET NAMES FOR LOGGING (from captured real client traffic)
 # =============================================================================
 
 PACKET_NAMES = {
@@ -281,7 +281,31 @@ PACKET_NAMES = {
     0x0151: "CRespActivityCommon",
 }
 
+# Extended packet name patterns (for logging unknown packets by prefix)
+PACKET_PREFIXES = {
+    "CUserLogin": "Auth",
+    "CHeartBeat": "Auth",
+    "CGuild": "Guild",
+    "CDaily": "Daily",
+    "CWeekly": "Weekly",
+    "CReqActivity": "Activity",
+    "STReqActivity": "Activity",
+    "CReqBattlepass": "Battlepass",
+    "CQuery": "Query",
+    "CReq": "Request",
+    "STReq": "Request",
+}
+
 
 def get_packet_name(msg_type: int) -> str:
     """Get human-readable packet name."""
     return PACKET_NAMES.get(msg_type, f"Packet_0x{msg_type:04X}")
+
+
+def get_packet_category(name: str) -> str:
+    """Get packet category for logging."""
+    for prefix, category in PACKET_PREFIXES.items():
+        if name.startswith(prefix):
+            return category
+    return "Unknown"
+
