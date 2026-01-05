@@ -1,5 +1,5 @@
 📦
-158837 /android/loggers/port_443_12020_storage_logger.js
+163704 /android/loggers/port_443_12020_storage_logger.js
 ✄
 // node_modules/frida-il2cpp-bridge/dist/index.js
 var __decorate = function(decorators, target, key, desc) {
@@ -2140,9 +2140,9 @@ var Il2Cpp2;
       if (Il2Cpp3.unityVersionIsBelow201830) {
         const types = this.assembly.object.method("GetTypes").invoke(false);
         const classes = globalThis.Array.from(types, (_) => new Il2Cpp3.Class(Il2Cpp3.exports.classFromObject(_)));
-        const Module2 = this.tryClass("<Module>");
-        if (Module2) {
-          classes.unshift(Module2);
+        const Module = this.tryClass("<Module>");
+        if (Module) {
+          classes.unshift(Module);
         }
         return classes;
       } else {
@@ -3840,47 +3840,189 @@ function hookNativeFileIO() {
     return;
   console.log("[NATIVE] Setting up file I/O hooks...");
   try {
-    const openPtr = Module.findExportByName(null, "open");
-    if (openPtr) {
-      Interceptor.attach(openPtr, {
-        onEnter(args) {
-          try {
-            this.path = args[0].readUtf8String();
-          } catch {
-            this.path = null;
-          }
-        },
-        onLeave(retval) {
-          try {
-            const fd = retval.toInt32();
-            if (fd >= 0 && this.path && isInterestingPath(this.path)) {
-              openFds.set(fd, this.path);
-              logStorage("file", "open", this.path);
+    const libc = Process.getModuleByName("libc.so");
+    try {
+      const openatPtr = libc.findExportByName("openat");
+      if (openatPtr) {
+        Interceptor.attach(openatPtr, {
+          onEnter(args) {
+            try {
+              this.path = args[1].readUtf8String();
+            } catch {
+              this.path = null;
             }
-          } catch {
+          },
+          onLeave(retval) {
+            try {
+              const fd = retval.toInt32();
+              const path = this.path;
+              if (fd >= 0 && path && isInterestingPath(path)) {
+                openFds.set(fd, path);
+                logStorage("file", "openat", path);
+              }
+            } catch {
+            }
           }
-        }
-      });
-      console.log("   \u2713 open()");
+        });
+        console.log("   \u2713 openat()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 openat hook failed: ${e}`);
     }
-    const closePtr = Module.findExportByName(null, "close");
-    if (closePtr) {
-      Interceptor.attach(closePtr, {
-        onEnter(args) {
-          try {
-            this.fd = args[0].toInt32();
-          } catch {
-            this.fd = -1;
+    try {
+      const openPtr = libc.findExportByName("open");
+      if (openPtr) {
+        Interceptor.attach(openPtr, {
+          onEnter(args) {
+            try {
+              this.path = args[0].readUtf8String();
+            } catch {
+              this.path = null;
+            }
+          },
+          onLeave(retval) {
+            try {
+              const fd = retval.toInt32();
+              const path = this.path;
+              if (fd >= 0 && path && isInterestingPath(path)) {
+                openFds.set(fd, path);
+                logStorage("file", "open", path);
+              }
+            } catch {
+            }
           }
-        },
-        onLeave() {
-          try {
-            openFds.delete(this.fd);
-          } catch {
+        });
+        console.log("   \u2713 open()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 open hook failed: ${e}`);
+    }
+    try {
+      const closePtr = libc.findExportByName("close");
+      if (closePtr) {
+        Interceptor.attach(closePtr, {
+          onEnter(args) {
+            try {
+              this.fd = args[0].toInt32();
+            } catch {
+              this.fd = -1;
+            }
+          },
+          onLeave() {
+            try {
+              openFds.delete(this.fd);
+            } catch {
+            }
           }
-        }
-      });
-      console.log("   \u2713 close()");
+        });
+        console.log("   \u2713 close()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 close hook failed: ${e}`);
+    }
+    try {
+      const readPtr = libc.findExportByName("read");
+      if (readPtr) {
+        Interceptor.attach(readPtr, {
+          onEnter(args) {
+            try {
+              this.fd = args[0].toInt32();
+              this.buf = args[1];
+            } catch {
+              this.fd = -1;
+              this.buf = null;
+            }
+          },
+          onLeave(retval) {
+            try {
+              const fd = this.fd;
+              const bytesRead = retval.toInt32();
+              const path = openFds.get(fd);
+              if (bytesRead > 0 && path) {
+                const previewLen = Math.min(bytesRead, 64);
+                const data = this.buf.readByteArray(previewLen);
+                let preview2 = "";
+                if (data) {
+                  const bytes = new Uint8Array(data);
+                  let isPrintable = true;
+                  for (let i = 0; i < bytes.length && i < 32; i++) {
+                    if (bytes[i] < 32 || bytes[i] > 126) {
+                      isPrintable = false;
+                      break;
+                    }
+                  }
+                  if (isPrintable) {
+                    for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                      preview2 += String.fromCharCode(bytes[i]);
+                    }
+                    if (bytesRead > 48)
+                      preview2 += "...";
+                  } else {
+                    for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                      preview2 += bytes[i].toString(16).padStart(2, "0") + " ";
+                    }
+                    if (bytesRead > 16)
+                      preview2 += "...";
+                  }
+                }
+                logStorage("file", "read", path, `${bytesRead}B: ${preview2}`);
+              }
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 read()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 read hook failed: ${e}`);
+    }
+    try {
+      const writePtr = libc.findExportByName("write");
+      if (writePtr) {
+        Interceptor.attach(writePtr, {
+          onEnter(args) {
+            try {
+              const fd = args[0].toInt32();
+              const buf = args[1];
+              const count = args[2].toInt32();
+              const path = openFds.get(fd);
+              if (path && count > 0) {
+                const previewLen = Math.min(count, 64);
+                const data = buf.readByteArray(previewLen);
+                let preview2 = "";
+                if (data) {
+                  const bytes = new Uint8Array(data);
+                  let isPrintable = true;
+                  for (let i = 0; i < bytes.length && i < 32; i++) {
+                    if (bytes[i] < 32 || bytes[i] > 126) {
+                      isPrintable = false;
+                      break;
+                    }
+                  }
+                  if (isPrintable) {
+                    for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                      preview2 += String.fromCharCode(bytes[i]);
+                    }
+                    if (count > 48)
+                      preview2 += "...";
+                  } else {
+                    for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                      preview2 += bytes[i].toString(16).padStart(2, "0") + " ";
+                    }
+                    if (count > 16)
+                      preview2 += "...";
+                  }
+                }
+                logStorage("file", "write", path, `${count}B: ${preview2}`);
+              }
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 write()");
+      }
+    } catch (e) {
+      console.log(`   \u2717 write hook failed: ${e}`);
     }
   } catch (e) {
     console.log(`   \u2717 File I/O hooks failed: ${e}`);

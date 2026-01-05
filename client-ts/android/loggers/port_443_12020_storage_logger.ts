@@ -539,31 +539,179 @@ function hookNativeFileIO(): void {
     console.log("[NATIVE] Setting up file I/O hooks...");
 
     try {
-        const openPtr = Module.findExportByName(null, "open");
-        if (openPtr) {
-            Interceptor.attach(openPtr, {
-                onEnter(args) { try { (this as any).path = args[0].readUtf8String(); } catch { (this as any).path = null; } },
-                onLeave(retval) {
-                    try {
-                        const fd = retval.toInt32();
-                        if (fd >= 0 && (this as any).path && isInterestingPath((this as any).path)) {
-                            openFds.set(fd, (this as any).path);
-                            logStorage("file", "open", (this as any).path);
-                        }
-                    } catch { }
-                },
-            });
-            console.log("   ✓ open()");
+        const libc = Process.getModuleByName("libc.so");
+
+        // openat is the primary syscall on Android (open is often a wrapper)
+        try {
+            const openatPtr = libc.findExportByName("openat");
+            if (openatPtr) {
+                Interceptor.attach(openatPtr, {
+                    onEnter(args) {
+                        try {
+                            // openat(int dirfd, const char *pathname, int flags, ...)
+                            (this as any).path = args[1].readUtf8String();
+                        } catch { (this as any).path = null; }
+                    },
+                    onLeave(retval) {
+                        try {
+                            const fd = retval.toInt32();
+                            const path = (this as any).path;
+                            if (fd >= 0 && path && isInterestingPath(path)) {
+                                openFds.set(fd, path);
+                                logStorage("file", "openat", path);
+                            }
+                        } catch { }
+                    },
+                });
+                console.log("   ✓ openat()");
+            }
+        } catch (e) {
+            console.log(`   ✗ openat hook failed: ${e}`);
         }
 
-        const closePtr = Module.findExportByName(null, "close");
-        if (closePtr) {
-            Interceptor.attach(closePtr, {
-                onEnter(args) { try { (this as any).fd = args[0].toInt32(); } catch { (this as any).fd = -1; } },
-                onLeave() { try { openFds.delete((this as any).fd); } catch { } },
-            });
-            console.log("   ✓ close()");
+        // Also hook open for completeness
+        try {
+            const openPtr = libc.findExportByName("open");
+            if (openPtr) {
+                Interceptor.attach(openPtr, {
+                    onEnter(args) {
+                        try { (this as any).path = args[0].readUtf8String(); }
+                        catch { (this as any).path = null; }
+                    },
+                    onLeave(retval) {
+                        try {
+                            const fd = retval.toInt32();
+                            const path = (this as any).path;
+                            if (fd >= 0 && path && isInterestingPath(path)) {
+                                openFds.set(fd, path);
+                                logStorage("file", "open", path);
+                            }
+                        } catch { }
+                    },
+                });
+                console.log("   ✓ open()");
+            }
+        } catch (e) {
+            console.log(`   ✗ open hook failed: ${e}`);
         }
+
+        // close
+        try {
+            const closePtr = libc.findExportByName("close");
+            if (closePtr) {
+                Interceptor.attach(closePtr, {
+                    onEnter(args) {
+                        try { (this as any).fd = args[0].toInt32(); }
+                        catch { (this as any).fd = -1; }
+                    },
+                    onLeave() {
+                        try { openFds.delete((this as any).fd); } catch { }
+                    },
+                });
+                console.log("   ✓ close()");
+            }
+        } catch (e) {
+            console.log(`   ✗ close hook failed: ${e}`);
+        }
+
+        // read
+        try {
+            const readPtr = libc.findExportByName("read");
+            if (readPtr) {
+                Interceptor.attach(readPtr, {
+                    onEnter(args) {
+                        try {
+                            (this as any).fd = args[0].toInt32();
+                            (this as any).buf = args[1];
+                        } catch {
+                            (this as any).fd = -1;
+                            (this as any).buf = null;
+                        }
+                    },
+                    onLeave(retval) {
+                        try {
+                            const fd = (this as any).fd;
+                            const bytesRead = retval.toInt32();
+                            const path = openFds.get(fd);
+                            if (bytesRead > 0 && path) {
+                                const previewLen = Math.min(bytesRead, 64);
+                                const data = (this as any).buf.readByteArray(previewLen);
+                                let preview = "";
+                                if (data) {
+                                    const bytes = new Uint8Array(data);
+                                    // Try to read as string if printable
+                                    let isPrintable = true;
+                                    for (let i = 0; i < bytes.length && i < 32; i++) {
+                                        if (bytes[i] < 32 || bytes[i] > 126) { isPrintable = false; break; }
+                                    }
+                                    if (isPrintable) {
+                                        for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                                            preview += String.fromCharCode(bytes[i]);
+                                        }
+                                        if (bytesRead > 48) preview += "...";
+                                    } else {
+                                        for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                                            preview += bytes[i].toString(16).padStart(2, "0") + " ";
+                                        }
+                                        if (bytesRead > 16) preview += "...";
+                                    }
+                                }
+                                logStorage("file", "read", path, `${bytesRead}B: ${preview}`);
+                            }
+                        } catch { }
+                    },
+                });
+                console.log("   ✓ read()");
+            }
+        } catch (e) {
+            console.log(`   ✗ read hook failed: ${e}`);
+        }
+
+        // write
+        try {
+            const writePtr = libc.findExportByName("write");
+            if (writePtr) {
+                Interceptor.attach(writePtr, {
+                    onEnter(args) {
+                        try {
+                            const fd = args[0].toInt32();
+                            const buf = args[1];
+                            const count = args[2].toInt32();
+                            const path = openFds.get(fd);
+                            if (path && count > 0) {
+                                const previewLen = Math.min(count, 64);
+                                const data = buf.readByteArray(previewLen);
+                                let preview = "";
+                                if (data) {
+                                    const bytes = new Uint8Array(data);
+                                    // Try to read as string if printable
+                                    let isPrintable = true;
+                                    for (let i = 0; i < bytes.length && i < 32; i++) {
+                                        if (bytes[i] < 32 || bytes[i] > 126) { isPrintable = false; break; }
+                                    }
+                                    if (isPrintable) {
+                                        for (let i = 0; i < Math.min(bytes.length, 48); i++) {
+                                            preview += String.fromCharCode(bytes[i]);
+                                        }
+                                        if (count > 48) preview += "...";
+                                    } else {
+                                        for (let i = 0; i < Math.min(bytes.length, 16); i++) {
+                                            preview += bytes[i].toString(16).padStart(2, "0") + " ";
+                                        }
+                                        if (count > 16) preview += "...";
+                                    }
+                                }
+                                logStorage("file", "write", path, `${count}B: ${preview}`);
+                            }
+                        } catch { }
+                    },
+                });
+                console.log("   ✓ write()");
+            }
+        } catch (e) {
+            console.log(`   ✗ write hook failed: ${e}`);
+        }
+
     } catch (e) {
         console.log(`   ✗ File I/O hooks failed: ${e}`);
     }
