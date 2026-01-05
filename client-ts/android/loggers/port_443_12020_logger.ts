@@ -402,39 +402,113 @@ function hookNativeNetwork(): void {
   console.log("[NATIVE] Setting up network hooks...");
   const libc = Process.getModuleByName("libc.so");
 
-  // getaddrinfo
+  // getaddrinfo - capture DNS resolution results
   try {
     const ptr = libc.findExportByName("getaddrinfo");
     if (ptr) {
       Interceptor.attach(ptr, {
-        onEnter(args) { try { (this as any).hostname = args[0].readUtf8String(); (this as any).result = args[3]; } catch { (this as any).hostname = null; } },
+        onEnter(args) {
+          try {
+            (this as any).hostname = args[0].readUtf8String();
+            (this as any).result = args[3];
+          } catch { (this as any).hostname = null; }
+        },
         onLeave(retval) {
           try {
             const hostname = (this as any).hostname;
             const resultPtr = (this as any).result;
             if (hostname && retval.toInt32() === 0 && resultPtr) {
               let ai = resultPtr.readPointer();
-              while (!ai.isNull()) {
-                const family = ai.add(4).readInt();
-                if (family === 2) {
-                  const addr = ai.add(Process.pointerSize === 8 ? 24 : 16).readPointer();
-                  if (!addr.isNull()) {
-                    const ip = `${addr.add(4).readU8()}.${addr.add(5).readU8()}.${addr.add(6).readU8()}.${addr.add(7).readU8()}`;
-                    if (!ipToHostname.has(ip)) ipToHostname.set(ip, hostname);
+              let count = 0;
+              while (!ai.isNull() && count < 50) {
+                count++;
+                try {
+                  const family = ai.add(4).readS32();
+                  if (family === 2) { // AF_INET
+                    const addrOffset = Process.pointerSize === 8 ? 24 : 16;
+                    const addr = ai.add(addrOffset).readPointer();
+                    if (!addr.isNull()) {
+                      const ip = `${addr.add(4).readU8()}.${addr.add(5).readU8()}.${addr.add(6).readU8()}.${addr.add(7).readU8()}`;
+                      ipToHostname.set(ip, hostname);
+                    }
                   }
-                }
-                ai = ai.add(Process.pointerSize === 8 ? 48 : 32).readPointer();
+                  // Move to next addrinfo (ai_next is at end of struct)
+                  const nextOffset = Process.pointerSize === 8 ? 40 : 28;
+                  ai = ai.add(nextOffset).readPointer();
+                } catch { break; }
               }
               captures.push({ t: elapsed(), type: "dns", host: hostname });
             }
-          } catch {}
+          } catch { }
         },
       });
       console.log("   ✓ getaddrinfo");
     }
+  } catch { }
+
+  // gethostbyname - legacy DNS resolution (used by some libraries)
+  try {
+    const ptr = libc.findExportByName("gethostbyname");
+    if (ptr) {
+      Interceptor.attach(ptr, {
+        onEnter(args) {
+          try { (this as any).hostname = args[0].readUtf8String(); } catch { (this as any).hostname = null; }
+        },
+        onLeave(retval) {
+          try {
+            const hostname = (this as any).hostname;
+            if (hostname && !retval.isNull()) {
+              // struct hostent: h_addr_list is at offset 16 (32-bit) or 24 (64-bit)
+              const addrListOffset = Process.pointerSize === 8 ? 24 : 16;
+              const addrList = retval.add(addrListOffset).readPointer();
+              if (!addrList.isNull()) {
+                const addrPtr = addrList.readPointer();
+                if (!addrPtr.isNull()) {
+                  const ip = `${addrPtr.readU8()}.${addrPtr.add(1).readU8()}.${addrPtr.add(2).readU8()}.${addrPtr.add(3).readU8()}`;
+                  ipToHostname.set(ip, hostname);
+                }
+              }
+            }
+          } catch { }
+        },
+      });
+      console.log("   ✓ gethostbyname");
+    }
+  } catch { }
+
+  // android_getaddrinfofornet - Android-specific DNS
+  try {
+    const ptr = libc.findExportByName("android_getaddrinfofornet");
+    if (ptr) {
+      Interceptor.attach(ptr, {
+        onEnter(args) {
+          try { (this as any).hostname = args[0].readUtf8String(); (this as any).result = args[3]; } catch { (this as any).hostname = null; }
+        },
+        onLeave(retval) {
+          try {
+            const hostname = (this as any).hostname;
+            const resultPtr = (this as any).result;
+            if (hostname && retval.toInt32() === 0 && resultPtr) {
+              let ai = resultPtr.readPointer();
+              if (!ai.isNull()) {
+                const family = ai.add(4).readS32();
+                if (family === 2) {
+                  const addr = ai.add(Process.pointerSize === 8 ? 24 : 16).readPointer();
+                  if (!addr.isNull()) {
+                    const ip = `${addr.add(4).readU8()}.${addr.add(5).readU8()}.${addr.add(6).readU8()}.${addr.add(7).readU8()}`;
+                    ipToHostname.set(ip, hostname);
+                  }
+                }
+              }
+            }
+          } catch {}
+        },
+      });
+      console.log("   ✓ android_getaddrinfofornet");
+    }
   } catch {}
 
-  // connect
+  // connect - track socket file descriptors to IPs
   try {
     const ptr = libc.findExportByName("connect");
     if (ptr) {
@@ -444,7 +518,7 @@ function hookNativeNetwork(): void {
             const fd = args[0].toInt32();
             const sockaddr = args[1];
             const family = sockaddr.readU16();
-            if (family === 2) {
+            if (family === 2) { // AF_INET
               const portBE = sockaddr.add(2).readU16();
               const port = ((portBE & 0xff) << 8) | ((portBE >> 8) & 0xff);
               const ip = `${sockaddr.add(4).readU8()}.${sockaddr.add(5).readU8()}.${sockaddr.add(6).readU8()}.${sockaddr.add(7).readU8()}`;
@@ -453,7 +527,11 @@ function hookNativeNetwork(): void {
                 stats.connections++;
                 const hostname = ipToHostname.get(ip) || ip;
                 captures.push({ t: elapsed(), type: "connect", ip, port, host: hostname });
-                console.log(`${ts()} [CONNECT] ${hostname}:${port}`);
+                if (ipToHostname.has(ip)) {
+                  console.log(`${ts()} [CONNECT] ${hostname}:${port}`);
+                } else {
+                  console.log(`${ts()} [CONNECT] ${ip}:${port}`);
+                }
               }
             }
           } catch {}
@@ -468,8 +546,11 @@ function hookTLS(): void {
   console.log("[NATIVE] Setting up TLS hooks...");
   const modules = Process.enumerateModules();
   
-  for (const mod of modules) {
-    if (!mod.name.toLowerCase().includes("ssl")) continue;
+  // Search modules that may contain SSL functions
+  const sslModules = modules.filter(mod => {
+    const name = mod.name.toLowerCase();
+    return name.includes("ssl") || name.includes("crypto") || name.includes("unity");
+  });
 
     try {
       const getFdPtr = mod.findExportByName("SSL_get_fd");
@@ -489,6 +570,36 @@ function hookTLS(): void {
       }
     } catch {}
 
+  // SSL_ctrl - captures SNI hostname via SSL_set_tlsext_host_name (cmd=55)
+  try {
+    const ctrlPtr = mod.findExportByName("SSL_ctrl");
+    if (ctrlPtr) {
+      Interceptor.attach(ctrlPtr, {
+        onEnter(args) {
+          try {
+            const cmd = args[1].toInt32();
+            // SSL_CTRL_SET_TLSEXT_HOSTNAME = 55
+            if (cmd === 55) {
+              const hostname = args[3].readUtf8String();
+              if (hostname) {
+                const sslKey = args[0].toString();
+                sslToHostname.set(sslKey, hostname);
+                const fd = sslToFd.get(sslKey);
+                if (fd !== undefined) {
+                  const addr = fdToAddr.get(fd);
+                  if (addr) {
+                    ipToHostname.set(addr.ip, hostname);
+                  }
+                }
+              }
+            }
+          } catch { }
+        },
+      });
+      console.log("   ✓ SSL_ctrl (SNI)");
+    }
+  } catch { }
+
     try {
       const sslRead = mod.findExportByName("SSL_read");
       if (sslRead) {
@@ -499,7 +610,32 @@ function hookTLS(): void {
             if (ret > 0) {
               const data = (this as any).buf.readByteArray(Math.min(ret, MAX_CAPTURE_BYTES));
               if (data) {
-                const { host, port } = getHostForSSL((this as any).ssl);
+                // Try to resolve host - for recv, we don't have Host header but cache should be populated from previous send
+                let { host, port } = getHostForSSL((this as any).ssl);
+
+                // If still unknown, try to get fd and lookup by IP one more time
+                if (host === "unknown") {
+                  const sslKey = ((this as any).ssl as NativePointer).toString();
+                  let fd = sslToFd.get(sslKey);
+                  if (fd === undefined && SSL_get_fd) {
+                    try {
+                      fd = SSL_get_fd((this as any).ssl);
+                      if (fd >= 0) sslToFd.set(sslKey, fd);
+                    } catch { }
+                  }
+                  if (fd !== undefined) {
+                    const addr = fdToAddr.get(fd);
+                    if (addr) {
+                      const cachedHost = ipToHostname.get(addr.ip);
+                      if (cachedHost) {
+                        host = cachedHost;
+                        sslToHostname.set(sslKey, host);
+                      }
+                      port = addr.port;
+                    }
+                  }
+                }
+
                 const classification = classifyHost(host);
                 stats.tls.total++; stats.tls[classification]++;
                 if (!shouldLogTls(classification)) { stats.tls.filtered++; return; }

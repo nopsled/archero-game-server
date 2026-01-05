@@ -6,10 +6,13 @@ requires-python = ">=3.13"
 dependencies = [
     "pyopenssl",
     "msgpack",
+    "flask",
+    "cryptography",
 ]
 
 [project.scripts]
 server = "core:main"
+combined = "combined_server:main"
 
 [build-system]
 requires = ["hatchling"]

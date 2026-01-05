@@ -13,6 +13,18 @@
     "format": "biome format --write .",
     "check": "biome check --write .",
 
+    "build:logger:443": "mkdir -p android/build && bunx frida-compile -o android/build/port_443_logger.js android/loggers/port_443_logger.ts",
+    "logger:443": "bun run build:logger:443 && frida -U -f com.habby.archero -l android/build/port_443_logger.js",
+    "logger:443:log": "bun run build:logger:443 && frida -U -f com.habby.archero -l android/build/port_443_logger.js 2>&1 | tee logs/sessions/tls_$(date +%Y%m%d_%H%M%S).log",
+
+    "build:logger:12020": "mkdir -p android/build && bunx frida-compile -o android/build/port_12020_logger.js android/loggers/port_12020_logger.ts",
+    "logger:12020": "bun run build:logger:12020 && frida -U -f com.habby.archero -l android/build/port_12020_logger.js",
+    "logger:12020:log": "bun run build:logger:12020 && frida -U -f com.habby.archero -l android/build/port_12020_logger.js 2>&1 | tee logs/sessions/port12020_$(date +%Y%m%d_%H%M%S).log",
+
+    "build:logger:443_12020": "mkdir -p android/build && bunx frida-compile -o android/build/port_443_12020_logger.js android/loggers/port_443_12020_logger.ts",
+    "logger:443_12020": "bun run build:logger:443_12020 && frida -U -f com.habby.archero -l android/build/port_443_12020_logger.js",
+    "logger:443_12020:log": "bun run build:logger:443_12020 && frida -U -f com.habby.archero -l android/build/port_443_12020_logger.js 2>&1 | tee logs/sessions/combined_$(date +%Y%m%d_%H%M%S).log",
+
     "build:patcher:443": "mkdir -p android/build && bunx frida-compile -o android/build/port443_redirect.js android/patchers/port443_redirect.ts",
     "patcher:443": "bun run build:patcher:443 && frida -U -f com.habby.archero -l android/build/port443_redirect.js",
     "patcher:443:log": "bun run build:patcher:443 && frida -U -f com.habby.archero -l android/build/port443_redirect.js 2>&1 | tee logs/patcher_443_$(date +%Y%m%d_%H%M%S).log",
@@ -21,21 +33,9 @@
     "patcher:12020": "bun run build:patcher:12020 && frida -U -f com.habby.archero -l android/build/port12020_redirect.js",
     "patcher:12020:log": "bun run build:patcher:12020 && frida -U -f com.habby.archero -l android/build/port12020_redirect.js 2>&1 | tee logs/patcher_12020_$(date +%Y%m%d_%H%M%S).log",
 
-    "build:port:443": "mkdir -p android/build && bunx frida-compile -o android/build/port_443_logger.js android/loggers/port_443_logger.ts",
-    "port:443": "bun run build:port:443 && frida -U -f com.habby.archero -l android/build/port_443_logger.js",
-    "port:443:log": "bun run build:port:443 && frida -U -f com.habby.archero -l android/build/port_443_logger.js 2>&1 | tee logs/sessions/tls_$(date +%Y%m%d_%H%M%S).log",
-
-    "build:port:443v2": "mkdir -p android/build && bunx frida-compile -o android/build/port_443_logger_v2.js android/loggers/port_443_logger_v2.ts",
-    "port:443v2": "bun run build:port:443v2 && frida -U -f com.habby.archero -l android/build/port_443_logger_v2.js",
-    "port:443v2:log": "bun run build:port:443v2 && frida -U -f com.habby.archero -l android/build/port_443_logger_v2.js 2>&1 | tee logs/sessions/tls_v2_$(date +%Y%m%d_%H%M%S).log",
-
-    "build:port:12020": "mkdir -p android/build && bunx frida-compile -o android/build/port_12020_logger.js android/loggers/port_12020_logger.ts",
-    "port:12020": "bun run build:port:12020 && frida -U -f com.habby.archero -l android/build/port_12020_logger.js",
-    "port:12020:log": "bun run build:port:12020 && frida -U -f com.habby.archero -l android/build/port_12020_logger.js 2>&1 | tee logs/sessions/port12020_$(date +%Y%m%d_%H%M%S).log",
-
-    "build:port:combined": "mkdir -p android/build && bunx frida-compile -o android/build/port_443_12020_logger.js android/loggers/port_443_12020_logger.ts",
-    "port:combined": "bun run build:port:combined && frida -U -f com.habby.archero -l android/build/port_443_12020_logger.js",
-    "port:combined:log": "bun run build:port:combined && frida -U -f com.habby.archero -l android/build/port_443_12020_logger.js 2>&1 | tee logs/sessions/combined_$(date +%Y%m%d_%H%M%S).log"
+    "build:patcher:443_12020": "mkdir -p android/build && bunx frida-compile -o android/build/port_443_12020_redirect.js android/patchers/port_443_12020_redirect.ts",
+    "patcher:443_12020": "bun run build:patcher:443_12020 && frida -U -f com.habby.archero -l android/build/port_443_12020_redirect.js",
+    "patcher:443_12020:log": "bun run build:patcher:443_12020 && frida -U -f com.habby.archero -l android/build/port_443_12020_redirect.js 2>&1 | tee logs/patcher_combined_$(date +%Y%m%d_%H%M%S).log"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",

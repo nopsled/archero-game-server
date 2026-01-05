@@ -1,5 +1,5 @@
 📦
-149479 /android/loggers/port_443_12020_logger.js
+153015 /android/loggers/port_443_12020_logger.js
 ✄
 // node_modules/frida-il2cpp-bridge/dist/index.js
 var __decorate = function(decorators, target, key, desc) {
@@ -3673,17 +3673,24 @@ function hookNativeNetwork() {
             const resultPtr = this.result;
             if (hostname && retval.toInt32() === 0 && resultPtr) {
               let ai = resultPtr.readPointer();
-              while (!ai.isNull()) {
-                const family = ai.add(4).readInt();
-                if (family === 2) {
-                  const addr = ai.add(Process.pointerSize === 8 ? 24 : 16).readPointer();
-                  if (!addr.isNull()) {
-                    const ip = `${addr.add(4).readU8()}.${addr.add(5).readU8()}.${addr.add(6).readU8()}.${addr.add(7).readU8()}`;
-                    if (!ipToHostname.has(ip))
+              let count = 0;
+              while (!ai.isNull() && count < 50) {
+                count++;
+                try {
+                  const family = ai.add(4).readS32();
+                  if (family === 2) {
+                    const addrOffset = Process.pointerSize === 8 ? 24 : 16;
+                    const addr = ai.add(addrOffset).readPointer();
+                    if (!addr.isNull()) {
+                      const ip = `${addr.add(4).readU8()}.${addr.add(5).readU8()}.${addr.add(6).readU8()}.${addr.add(7).readU8()}`;
                       ipToHostname.set(ip, hostname);
+                    }
                   }
+                  const nextOffset = Process.pointerSize === 8 ? 40 : 28;
+                  ai = ai.add(nextOffset).readPointer();
+                } catch {
+                  break;
                 }
-                ai = ai.add(Process.pointerSize === 8 ? 48 : 32).readPointer();
               }
               captures.push({ t: elapsed(), type: "dns", host: hostname });
             }
@@ -3692,6 +3699,76 @@ function hookNativeNetwork() {
         }
       });
       console.log("   \u2713 getaddrinfo");
+    }
+  } catch {
+  }
+  try {
+    const ptr2 = libc.findExportByName("gethostbyname");
+    if (ptr2) {
+      Interceptor.attach(ptr2, {
+        onEnter(args) {
+          try {
+            this.hostname = args[0].readUtf8String();
+          } catch {
+            this.hostname = null;
+          }
+        },
+        onLeave(retval) {
+          try {
+            const hostname = this.hostname;
+            if (hostname && !retval.isNull()) {
+              const addrListOffset = Process.pointerSize === 8 ? 24 : 16;
+              const addrList = retval.add(addrListOffset).readPointer();
+              if (!addrList.isNull()) {
+                const addrPtr = addrList.readPointer();
+                if (!addrPtr.isNull()) {
+                  const ip = `${addrPtr.readU8()}.${addrPtr.add(1).readU8()}.${addrPtr.add(2).readU8()}.${addrPtr.add(3).readU8()}`;
+                  ipToHostname.set(ip, hostname);
+                }
+              }
+            }
+          } catch {
+          }
+        }
+      });
+      console.log("   \u2713 gethostbyname");
+    }
+  } catch {
+  }
+  try {
+    const ptr2 = libc.findExportByName("android_getaddrinfofornet");
+    if (ptr2) {
+      Interceptor.attach(ptr2, {
+        onEnter(args) {
+          try {
+            this.hostname = args[0].readUtf8String();
+            this.result = args[3];
+          } catch {
+            this.hostname = null;
+          }
+        },
+        onLeave(retval) {
+          try {
+            const hostname = this.hostname;
+            const resultPtr = this.result;
+            if (hostname && retval.toInt32() === 0 && resultPtr) {
+              let ai = resultPtr.readPointer();
+              if (!ai.isNull()) {
+                const family = ai.add(4).readS32();
+                if (family === 2) {
+                  const addr = ai.add(Process.pointerSize === 8 ? 24 : 16).readPointer();
+                  if (!addr.isNull()) {
+                    const ip = `${addr.add(4).readU8()}.${addr.add(5).readU8()}.${addr.add(6).readU8()}.${addr.add(7).readU8()}`;
+                    ipToHostname.set(ip, hostname);
+                  }
+                }
+              }
+            }
+          } catch {
+          }
+        }
+      });
+      console.log("   \u2713 android_getaddrinfofornet");
     }
   } catch {
   }
@@ -3713,7 +3790,11 @@ function hookNativeNetwork() {
                 stats.connections++;
                 const hostname = ipToHostname.get(ip) || ip;
                 captures.push({ t: elapsed(), type: "connect", ip, port, host: hostname });
-                console.log(`${ts()} [CONNECT] ${hostname}:${port}`);
+                if (ipToHostname.has(ip)) {
+                  console.log(`${ts()} [CONNECT] ${hostname}:${port}`);
+                } else {
+                  console.log(`${ts()} [CONNECT] ${ip}:${port}`);
+                }
               }
             }
           } catch {
@@ -3748,6 +3829,35 @@ function hookTLS() {
           }
         });
         console.log("   \u2713 SSL_set_fd");
+      }
+    } catch {
+    }
+    try {
+      const ctrlPtr = mod.findExportByName("SSL_ctrl");
+      if (ctrlPtr) {
+        Interceptor.attach(ctrlPtr, {
+          onEnter(args) {
+            try {
+              const cmd = args[1].toInt32();
+              if (cmd === 55) {
+                const hostname = args[3].readUtf8String();
+                if (hostname) {
+                  const sslKey = args[0].toString();
+                  sslToHostname.set(sslKey, hostname);
+                  const fd = sslToFd.get(sslKey);
+                  if (fd !== void 0) {
+                    const addr = fdToAddr.get(fd);
+                    if (addr) {
+                      ipToHostname.set(addr.ip, hostname);
+                    }
+                  }
+                }
+              }
+            } catch {
+            }
+          }
+        });
+        console.log("   \u2713 SSL_ctrl (SNI)");
       }
     } catch {
     }
