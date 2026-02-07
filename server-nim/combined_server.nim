@@ -2,7 +2,7 @@
 ##
 ## Runs both an HTTPS API server and the game protocol TCP server.
 
-import std/[os, strformat, strutils, times, json, osproc, net, asynchttpserver, asyncdispatch]
+import std/[os, strformat, strutils, json, osproc, net, asynchttpserver, asyncdispatch]
 import core
 
 const
@@ -13,120 +13,97 @@ const
 # CERTIFICATE GENERATION
 # =============================================================================
 
-proc generateSelfSignedCerts(certsDir: string) =
-  ## Generate self-signed certificates using OpenSSL CLI
-  let certFile = certsDir / "cert.pem"
-  let keyFile = certsDir / "key.pem"
+proc generateSelfSignedCerts(certsDir: string): tuple[certFile, keyFile: string] =
+  ## Create self-signed certificate if not exists.
+  let certFile = certsDir / "server.crt"
+  let keyFile = certsDir / "server.key"
 
   if fileExists(certFile) and fileExists(keyFile):
-    echo "[HTTPS] Certificates already exist"
-    return
+    echo fmt"[HTTPS] Certificates already exist: {certFile}"
+    return (certFile, keyFile)
 
   createDir(certsDir)
   echo "[HTTPS] Generating self-signed certificates..."
 
-  let cmd = fmt"""openssl req -x509 -newkey rsa:2048 -keyout {keyFile} -out {certFile} -days 365 -nodes -subj "/C=US/ST=State/L=City/O=Archero/CN=localhost" 2>/dev/null"""
+  # Use openssl with SANs matching Python's cryptography lib output
+  let cmd = fmt"""openssl req -x509 -newkey rsa:2048 -keyout {keyFile} -out {certFile} -days 365 -nodes -subj "/CN=habby.mobi/O=Archero Emulator" -addext "subjectAltName=DNS:*.habby.mobi,DNS:*.habby.com,DNS:localhost" 2>/dev/null"""
   let (output, exitCode) = execCmdEx(cmd)
 
   if exitCode == 0:
-    echo "[HTTPS] ✓ Certificates generated"
+    echo fmt"[HTTPS] Created self-signed certificate: {certFile}"
   else:
-    echo fmt"[HTTPS] ✗ Certificate generation failed: {output}"
+    echo fmt"[HTTPS] Certificate generation failed: {output}"
+    echo "[HTTPS] Or manually create certs/server.crt and certs/server.key"
+
+  return (certFile, keyFile)
+
 
 # =============================================================================
 # HTTPS API SERVER
 # =============================================================================
 
-proc createJsonResponse(data: JsonNode): string =
-  return $data
-
-proc startHttpsServer(certsDir: string) {.async.} =
-  ## Start the HTTPS API server
+proc startHttpsServer() {.async.} =
+  ## Start the HTTPS API server (Flask-equivalent catch-all routes)
   var server = newAsyncHttpServer()
 
   proc handler(req: Request) {.async.} =
     let path = req.url.path
-    let httpMethod = req.reqMethod
+    let httpMethod = $req.reqMethod
 
-    echo fmt"[HTTPS] {httpMethod} {path}"
-
-    # Route handling
-    case path
-    of "/":
-      let body = createJsonResponse(%*{
-        "status": "ok",
-        "server": "Archero Game Server (Nim)",
-        "version": "0.0.1"
-      })
+    # Root handler
+    if path == "/":
+      echo fmt"[HTTPS] {httpMethod} / from client"
+      let body = $(%*{"status": "ok", "server": "archero-emulator"})
       await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
+      return
 
-    of "/api/health":
-      let body = createJsonResponse(%*{
-        "status": "healthy",
-        "timestamp": getTime().toUnix(),
-        "uptime_seconds": 0
-      })
+    # API catch-all handler — returns success for all endpoints
+    if path.startsWith("/api/"):
+      let apiPath = path[4 .. ^1]  # Strip /api prefix for logging
+      echo fmt"[HTTPS] {httpMethod} /api{apiPath} from client"
+
+      # Log headers
+      var headerStr = "{"
+      for key, val in req.headers.pairs:
+        headerStr.add(fmt"'{key}': '{val}', ")
+      headerStr.add("}")
+      echo fmt"[HTTPS]   Headers: {headerStr}"
+
+      # Log body preview
+      if req.body.len > 0:
+        let bodyPreview = if req.body.len > 500: req.body[0 ..< 500] else: req.body
+        echo fmt"[HTTPS]   Body ({req.body.len}b): {bodyPreview}"
+
+      let body = $(%*{"code": 0, "msg": "success", "data": {}})
       await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
+      return
 
-    of "/api/version":
-      let body = createJsonResponse(%*{
-        "version": "0.0.1",
-        "protocol_version": "12020",
-        "game_version": "latest"
-      })
-      await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
+    # Catch-all handler for any other paths
+    echo fmt"[HTTPS] {httpMethod} /{path} from client"
 
-    of "/api/config":
-      let body = createJsonResponse(%*{
-        "tcp_port": TCP_PORT_NUM,
-        "https_port": HTTPS_PORT,
-        "tls_enabled": true
-      })
-      await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
+    # Log headers
+    var headerStr = "{"
+    for key, val in req.headers.pairs:
+      headerStr.add(fmt"'{key}': '{val}', ")
+    headerStr.add("}")
+    echo fmt"[HTTPS]   Headers: {headerStr}"
 
-    of "/api/server/status":
-      let body = createJsonResponse(%*{
-        "tcp_server": "running",
-        "https_server": "running",
-        "connections": 0,
-      })
-      await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
+    # Log body preview
+    if req.body.len > 0:
+      let bodyPreview = if req.body.len > 500: req.body[0 ..< 500] else: req.body
+      echo fmt"[HTTPS]   Body ({req.body.len}b): {bodyPreview}"
 
-    of "/api/game-config/game_config.json":
-      let body = createJsonResponse(%*{
-        "version": 1,
-        "config": {}
-      })
-      await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
-
-    of "/api/player/profile":
-      let body = createJsonResponse(%*{
-        "userId": 72453418394682577,
-        "nickname": "",
-        "level": 1,
-        "coins": 199,
-        "diamonds": 100
-      })
-      await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
-
-    of "/api/shop/iap":
-      let body = createJsonResponse(%*{
-        "products": [],
-        "status": "ok"
-      })
-      await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
-
-    else:
-      let body = createJsonResponse(%*{
-        "error": "Not Found",
-        "path": path,
-        "status": 404
-      })
-      await req.respond(Http404, body, newHttpHeaders([("Content-Type", "application/json")]))
+    let body = $(%*{"code": 0, "msg": "ok"})
+    await req.respond(Http200, body, newHttpHeaders([("Content-Type", "application/json")]))
 
   # Note: asynchttpserver doesn't support SSL directly in Nim.
   # The HTTPS API runs as HTTP. TLS is handled by the TCP game server.
-  echo fmt"[HTTPS] ✓ Starting HTTP API server on port {HTTPS_PORT}"
+  echo ""
+  echo "╔═══════════════════════════════════════════════════════════╗"
+  echo fmt"║           🔒 HTTPS Server - Port {HTTPS_PORT}                    ║"
+  echo "╚═══════════════════════════════════════════════════════════╝"
+  echo ""
+  echo fmt"[HTTPS] Server listening on 0.0.0.0:{HTTPS_PORT}"
   await server.serve(Port(HTTPS_PORT), handler, address = "0.0.0.0")
 
 
@@ -134,13 +111,16 @@ proc startHttpsServer(certsDir: string) {.async.} =
 # TCP SERVER THREAD
 # =============================================================================
 
-proc runTcpServer(certsDir: string) {.thread.} =
+proc runTcpServer(args: tuple[certFile, keyFile: string]) {.thread.} =
   {.cast(gcsafe).}:
-    let certFile = certsDir / "cert.pem"
-    let keyFile = certsDir / "key.pem"
-    let useTls = fileExists(certFile) and fileExists(keyFile)
+    let useTls = fileExists(args.certFile) and fileExists(args.keyFile)
 
-    var server = newTCPServer(useTls, certFile, keyFile)
+    if useTls:
+      echo fmt"[TCP] TLS enabled with certificate: {args.certFile}"
+    else:
+      echo "[TCP] WARNING: No certificate, running WITHOUT TLS!"
+
+    var server = newTCPServer(useTls, args.certFile, args.keyFile)
     server.run(TCP_PORT_NUM)
 
 
@@ -152,29 +132,26 @@ proc main() =
   let certsDir = getAppDir() / "certs"
 
   echo ""
-  echo "╔══════════════════════════════════════════╗"
-  echo "║    Archero Combined Server (Nim)         ║"
-  echo "║    HTTPS (:443) + TCP (:12020)           ║"
-  echo "╚══════════════════════════════════════════╝"
+  echo "╔═══════════════════════════════════════════════════════════════════╗"
+  echo "║           🎮 Archero Combined Server                             ║"
+  echo "║           Port 443 (HTTPS) + Port 12020 (TCP Game Protocol)      ║"
+  echo "╚═══════════════════════════════════════════════════════════════════╝"
   echo ""
 
   # Generate certificates if needed
-  generateSelfSignedCerts(certsDir)
+  let (certFile, keyFile) = generateSelfSignedCerts(certsDir)
 
-  # Start TCP server in a thread
-  var tcpThread: Thread[string]
-  createThread(tcpThread, runTcpServer, certsDir)
+  # Start TCP server in a thread (mirrors Python: HTTPS in thread, TCP in main)
+  # But in Nim, async HTTP runs in main, TCP in thread
+  var tcpThread: Thread[tuple[certFile, keyFile: string]]
+  createThread(tcpThread, runTcpServer, (certFile, keyFile))
 
-  echo fmt"[Main] TCP server thread started"
-
-  # Run HTTPS server in main thread (async)
-  echo fmt"[Main] Starting HTTPS server..."
-
+  # Run HTTPS server in main thread (async) — mirrors Python's Flask
   try:
-    waitFor startHttpsServer(certsDir)
+    waitFor startHttpsServer()
   except:
-    echo fmt"[Main] HTTPS server error: {getCurrentExceptionMsg()}"
-    echo "[Main] Hint: Port 443 may require root/sudo"
+    echo fmt"[HTTPS] Error: {getCurrentExceptionMsg()}"
+    echo fmt"[HTTPS] Permission denied for port {HTTPS_PORT}. Try running with sudo or use port 8443."
 
   joinThread(tcpThread)
 

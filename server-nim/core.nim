@@ -2,86 +2,127 @@
 ##
 ## Binary protocol server for game client communication.
 ## Uses the protocol module for packet handling.
+##
+## Run: ./combined_server
 
-import std/[net, strformat, os, nativesockets]
+import std/[net, strformat, strutils, os, nativesockets, endians]
 import protocol/packet_handler
-import protocol/packet
 
 const
   TCP_PORT* = 12020
   BUFFER_SIZE = 65536
 
+
+# =============================================================================
+# GAME CLIENT
+# =============================================================================
+
 type
-  GameClient* = object
+  GameClient* = ref object
     socket: Socket
     address: string
     buffer: seq[byte]
-    connected: bool
+    running*: bool
 
-  TCPServer* = object
+  TCPServer* = ref object
     socket: Socket
-    useTls: bool
     sslCtx: SslContext
-    running: bool
+    useTls: bool
+    running*: bool
+    port: int
+    clients: seq[GameClient]
 
 proc newGameClient(socket: Socket, address: string): GameClient =
-  GameClient(socket: socket, address: address, buffer: @[], connected: true)
+  GameClient(socket: socket, address: address, buffer: @[], running: true)
 
-proc processPackets(client: var GameClient) =
+proc toHex(data: seq[byte], maxBytes: int = 64): string =
+  ## Convert bytes to hex string with truncation
+  let preview = if data.len > maxBytes: data[0 ..< maxBytes] else: data
+  for b in preview:
+    result.add(b.toHex(2).toLowerAscii())
+  if data.len > maxBytes:
+    result.add("...")
+
+proc send*(client: GameClient, data: seq[byte]) =
+  ## Send data to the client
+  try:
+    client.socket.send(cast[string](data))
+
+    # Verbose logging with hex preview
+    if data.len >= HEADER_SIZE:
+      var msgType: uint16
+      littleEndian16(addr msgType, unsafeAddr data[4])
+      let packetName = getPacketName(msgType)
+      let hexPreview = toHex(data)
+      echo fmt"[TCP][S→C] {packetName} (0x{msgType:04X}), {data.len} bytes"
+      echo fmt"[TCP]      Hex: {hexPreview}"
+  except:
+    echo fmt"[TCP] Error sending to {client.address}: {getCurrentExceptionMsg()}"
+
+proc processBuffer(client: GameClient) =
   ## Process complete packets from the buffer
-  while client.buffer.len >= 6:  # 4 bytes length + 2 bytes msg type
-    # Read total length from first 4 bytes
-    var totalLen: uint32
-    copyMem(addr totalLen, addr client.buffer[0], 4)
+  while client.buffer.len >= HEADER_SIZE:
+    # Read packet length from header (total size including header)
+    var packetLen: uint32
+    littleEndian32(addr packetLen, unsafeAddr client.buffer[0])
 
-    let packetLen = 4 + totalLen.int  # length prefix + payload
-    if client.buffer.len < packetLen:
-      break  # Wait for more data
-
-    # Extract and process the packet
-    let packetData = client.buffer[0 ..< packetLen]
-    client.buffer = client.buffer[packetLen .. ^1]
-
-    try:
-      let (pkt, _) = Packet.fromBytes(packetData)
-      let response = handlePacket(pkt.msgType, pkt.payload)
-      client.socket.send(cast[string](response))
-      echo fmt"[TCP] >> Response sent ({response.len}B)"
-    except ValueError as e:
-      echo fmt"[TCP] Error processing packet: {e.msg}"
-
-proc handleClient(client: var GameClient) =
-  ## Handle a connected client
-  echo fmt"[TCP] Client connected: {client.address}"
-  var data = newString(BUFFER_SIZE)
-
-  while client.connected:
-    try:
-      let bytesRead = client.socket.recv(data, BUFFER_SIZE)
-      if bytesRead <= 0:
-        echo fmt"[TCP] Client disconnected: {client.address}"
-        client.connected = false
-        break
-
-      # Add received data to buffer
-      for i in 0 ..< bytesRead:
-        client.buffer.add(data[i].byte)
-
-      echo fmt"[TCP] Received {bytesRead}B from {client.address} (buffer: {client.buffer.len}B)"
-      client.processPackets()
-    except:
-      echo fmt"[TCP] Error with client {client.address}: {getCurrentExceptionMsg()}"
-      client.connected = false
+    # Check if we have the complete packet
+    if client.buffer.len.uint32 < packetLen:
+      echo fmt"[TCP] Waiting for more data: have {client.buffer.len}, need {packetLen}"
       break
 
-  try:
-    client.socket.close()
-  except:
-    discard
+    # Extract complete packet
+    let packetData = client.buffer[0 ..< packetLen.int]
+    client.buffer = client.buffer[packetLen.int .. ^1]
+
+    # Handle packet
+    try:
+      let (msgType, payload) = parsePacket(packetData)
+      let packetName = getPacketName(msgType)
+
+      # Verbose logging with hex preview
+      let hexPreview = toHex(packetData)
+      echo fmt"[TCP][C→S] {packetName} (0x{msgType:04X}), payload={payload.len} bytes"
+      echo fmt"[TCP]      Hex: {hexPreview}"
+
+      # Get response if any
+      let response = handlePacket(msgType, payload)
+      client.send(response)
+    except ValueError as e:
+      echo fmt"[TCP] Error handling packet: {e.msg}"
+
+proc receiveLoop(client: GameClient) {.thread.} =
+  ## Main receive loop for the client
+  {.cast(gcsafe).}:
+    echo fmt"[TCP] Client connected: {client.address}"
+    var data = newString(BUFFER_SIZE)
+
+    try:
+      while client.running:
+        let bytesRead = client.socket.recv(data, BUFFER_SIZE)
+        if bytesRead <= 0:
+          break
+
+        for i in 0 ..< bytesRead:
+          client.buffer.add(data[i].byte)
+
+        client.processBuffer()
+    except:
+      echo fmt"[TCP] Error receiving from {client.address}: {getCurrentExceptionMsg()}"
+
+    try:
+      client.socket.close()
+    except:
+      discard
+    echo fmt"[TCP] Connection closed: {client.address}"
+
+
+# =============================================================================
+# TCP SERVER
+# =============================================================================
 
 proc newTCPServer*(useTls: bool = true, certFile: string = "", keyFile: string = ""): TCPServer =
-  result.useTls = useTls
-  result.running = false
+  result = TCPServer(useTls: useTls, running: false, clients: @[])
 
   if useTls:
     result.sslCtx = newContext(
@@ -91,57 +132,85 @@ proc newTCPServer*(useTls: bool = true, certFile: string = "", keyFile: string =
       keyFile = keyFile
     )
 
-proc run*(server: var TCPServer, port: int = TCP_PORT) =
+proc stop*(server: TCPServer) =
+  ## Stop the server and close all clients
+  server.running = false
+
+  for client in server.clients:
+    client.running = false
+    try:
+      client.socket.close()
+    except:
+      discard
+
+  if server.socket != nil:
+    try:
+      server.socket.close()
+    except:
+      discard
+
+  echo "[TCP] Server stopped"
+
+proc run*(server: TCPServer, port: int = TCP_PORT) =
   ## Run the TCP server
   server.socket = newSocket()
   server.socket.setSockOpt(OptReuseAddr, true)
   server.socket.bindAddr(Port(port))
-  server.socket.listen()
+  server.socket.listen(10)
   server.running = true
+  server.port = port
 
-  echo fmt"[TCP] ✓ Server listening on port {port}" & (if server.useTls: " (TLS)" else: "")
+  let tlsStatus = if server.useTls: "🔒 TLS ENABLED" else: "⚠️  NO TLS"
+  echo ""
+  echo "╔═══════════════════════════════════════════════════════════╗"
+  echo fmt"║           🎮 Archero TCP Server - Port {port}           ║"
+  echo fmt"║           {tlsStatus:^41}   ║"
+  echo "╚═══════════════════════════════════════════════════════════╝"
+  echo ""
+  let tlsLabel = if server.useTls: "Enabled" else: "Disabled"
+  echo fmt"[TCP] Server listening on 0.0.0.0:{port}"
+  echo fmt"[TCP] TLS: {tlsLabel}"
+  echo "[TCP] Waiting for game client connections..."
 
-  while server.running:
-    var clientSocket: Socket = newSocket()
-    var clientAddr = ""
-
-    try:
-      server.socket.acceptAddr(clientSocket, clientAddr)
-
-      if server.useTls:
-        try:
-          server.sslCtx.wrapSocket(clientSocket)
-        except:
-          echo fmt"[TCP] TLS handshake failed for {clientAddr}: {getCurrentExceptionMsg()}"
-          clientSocket.close()
-          continue
-
-      var client = newGameClient(clientSocket, clientAddr)
-      # Handle client in current thread (blocking)
-      # For production, spawn threads
-      handleClient(client)
-    except:
-      echo fmt"[TCP] Accept error: {getCurrentExceptionMsg()}"
-
-proc stop*(server: var TCPServer) =
-  server.running = false
   try:
-    server.socket.close()
+    while server.running:
+      var clientSocket: Socket = newSocket()
+      var clientAddr = ""
+
+      try:
+        server.socket.acceptAddr(clientSocket, clientAddr)
+
+        if server.useTls:
+          try:
+            server.sslCtx.wrapSocket(clientSocket)
+            echo fmt"[TCP] TLS handshake completed with {clientAddr}"
+          except:
+            echo fmt"[TCP] TLS handshake failed with {clientAddr}: {getCurrentExceptionMsg()}"
+            clientSocket.close()
+            continue
+
+        var client = newGameClient(clientSocket, clientAddr)
+        server.clients.add(client)
+
+        # Start receive thread (daemon-like — each client gets own thread)
+        var clientThread: Thread[GameClient]
+        createThread(clientThread, receiveLoop, client)
+
+      except:
+        echo fmt"[TCP] Accept error: {getCurrentExceptionMsg()}"
   except:
-    discard
+    echo "\n[TCP] Shutting down..."
+
+  server.stop()
+
 
 # Main entry point for standalone TCP server
 proc main() =
   let certsDir = getAppDir() / "certs"
-  let certFile = certsDir / "cert.pem"
-  let keyFile = certsDir / "key.pem"
+  let certFile = certsDir / "server.crt"
+  let keyFile = certsDir / "server.key"
 
   let useTls = fileExists(certFile) and fileExists(keyFile)
-
-  echo "╔══════════════════════════════════════╗"
-  echo "║    Archero TCP Server (Nim)          ║"
-  echo "╚══════════════════════════════════════╝"
-  echo ""
 
   var server = newTCPServer(useTls, certFile, keyFile)
   server.run()

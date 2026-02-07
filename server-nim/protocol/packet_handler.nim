@@ -7,7 +7,7 @@
 ## - Request packets are usually odd numbers
 ## - Response packets are request + 1
 
-import std/[tables, strformat, times, endians]
+import std/[tables, strformat, strutils, times, endians]
 import binary, common, login, misc, daily, battlepass, activities
 
 # =============================================================================
@@ -83,6 +83,28 @@ proc getPacketName*(msgType: uint16): string =
     return PACKET_NAMES[msgType]
   return fmt"Packet_0x{msgType:04X}"
 
+# Extended packet name patterns (for logging unknown packets by prefix)
+let PACKET_PREFIXES* = {
+  "CUserLogin": "Auth",
+  "CHeartBeat": "Auth",
+  "CGuild": "Guild",
+  "CDaily": "Daily",
+  "CWeekly": "Weekly",
+  "CReqActivity": "Activity",
+  "STReqActivity": "Activity",
+  "CReqBattlepass": "Battlepass",
+  "CQuery": "Query",
+  "CReq": "Request",
+  "STReq": "Request",
+}.toTable
+
+proc getPacketCategory*(name: string): string =
+  ## Get packet category for logging.
+  for prefix, category in PACKET_PREFIXES.pairs:
+    if name.startsWith(prefix):
+      return category
+  return "Unknown"
+
 
 # =============================================================================
 # PACKET CREATION
@@ -102,7 +124,8 @@ proc parsePacket*(data: seq[byte]): tuple[msgType: uint16, payload: seq[byte]] =
 
 proc createPacket*(msgType: uint16, payload: seq[byte]): seq[byte] =
   ## Create a packet with header. Returns complete packet bytes.
-  let totalLen = (2 + payload.len).uint32
+  ## Length field = total packet size (header + payload) matching Python's convention
+  let totalLen = (HEADER_SIZE + payload.len).uint32
   result = newSeq[byte](4 + 2 + payload.len)
   var leLen: uint32
   littleEndian32(addr leLen, unsafeAddr totalLen)
