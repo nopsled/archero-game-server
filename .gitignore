@@ -205,3 +205,5 @@ node_modules
 apks-so-files/archero_final/META-INF/androidx.savedstate_savedstate.version
 apks-so-files/archero_final/assets/aa/Android/campatlas_assets_atlas/campgift_a6cd823920062ca6046312a026f4b1ca.bundle
 archero_final/
+
+libil2cpp.so.i64
