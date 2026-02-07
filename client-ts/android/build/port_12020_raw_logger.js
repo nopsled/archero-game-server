@@ -1,5 +1,5 @@
 📦
-143995 /android/loggers/port_12020_raw_logger.js
+149590 /android/loggers/port_12020_raw_logger.js
 ✄
 // node_modules/frida-il2cpp-bridge/dist/index.js
 var __decorate = function(decorators, target, key, desc) {
@@ -3503,21 +3503,93 @@ var NativeTlsBypass = class _NativeTlsBypass {
         });
       }
       if (mod.name === "libunity.so") {
-        const offset = 12330420;
-        const target = mod.base.add(offset);
-        console.log(`[NativeTlsBypass] Hooking libunity.so verify function at ${target} (base+${ptr(offset)})`);
+        const verifyResultOffset = 12330420;
+        const verifyResultTarget = mod.base.add(verifyResultOffset);
+        console.log(`[NativeTlsBypass] Replacing libunity.so verify result at ${verifyResultTarget} (base+0x${verifyResultOffset.toString(16)})`);
         try {
-          Interceptor.attach(target, {
+          Interceptor.replace(verifyResultTarget, new NativeCallback(function(sslCtx) {
+            if (isDebugging)
+              console.log(`[NativeTlsBypass] verify result REPLACED - returning 0`);
+            return 0;
+          }, "uint32", ["pointer"]));
+          console.log(`[NativeTlsBypass] Successfully replaced verify result function`);
+        } catch (e) {
+          console.log(`[NativeTlsBypass] Failed to replace verify result: ${e}`);
+          try {
+            Interceptor.attach(verifyResultTarget, {
+              onEnter: function(args) {
+                if (isDebugging)
+                  console.log(`[NativeTlsBypass] verify result called (fallback attach)`);
+              },
+              onLeave: function(retval) {
+                if (isDebugging)
+                  console.log(`[NativeTlsBypass] verify result returning: ${retval} -> forcing 0`);
+                retval.replace(ptr(0));
+              }
+            });
+          } catch (e2) {
+            console.log(`[NativeTlsBypass] Fallback attach also failed: ${e2}`);
+          }
+        }
+        try {
+          const ranges = mod.enumerateRanges("r-x");
+          for (const range of ranges) {
+            try {
+              Memory.scan(range.base, range.size, "FF 83 ?? ?? ?? ?? ?? 91", {
+                onMatch: (address, size) => {
+                  if (isDebugging)
+                    console.log(`[NativeTlsBypass] Found potential verify func at ${address}`);
+                },
+                onComplete: () => {
+                }
+              });
+            } catch (e2) {
+            }
+          }
+        } catch (e) {
+          if (isDebugging)
+            console.log(`[NativeTlsBypass] Scan failed: ${e}`);
+        }
+        const handshakeOffsets = [12294764, 12294656];
+        for (const offset of handshakeOffsets) {
+          try {
+            const target = mod.base.add(offset);
+            Interceptor.attach(target, {
+              onEnter: function(args) {
+                const sslCtx = args[0];
+                const authmodeOffsets = [232, 236, 240, 248];
+                for (const authOffset of authmodeOffsets) {
+                  try {
+                    const currentMode = sslCtx.add(authOffset).readU32();
+                    if (currentMode === 1 || currentMode === 2) {
+                      sslCtx.add(authOffset).writeU32(0);
+                      if (isDebugging)
+                        console.log(`[NativeTlsBypass] Set authmode to VERIFY_NONE at offset ${authOffset}`);
+                    }
+                  } catch (e3) {
+                  }
+                }
+              }
+            });
+            console.log(`[NativeTlsBypass] Hooked handshake function at ${target} (base+0x${offset.toString(16)})`);
+          } catch (e) {
+          }
+        }
+        const confVerifyOffset = 12309544;
+        try {
+          const confVerifyTarget = mod.base.add(confVerifyOffset);
+          Interceptor.attach(confVerifyTarget, {
             onEnter: function(args) {
-              console.log(`[NativeTlsBypass] libunity.so verify function called (args: ${args[0]}, ${args[1]}, ${args[2]})`);
-            },
-            onLeave: function(retval) {
-              console.log(`[NativeTlsBypass] libunity.so verify function returning: ${retval} -> forcing 0`);
-              retval.replace(ptr(0));
+              if (isDebugging)
+                console.log(`[NativeTlsBypass] conf_verify called, original callback: ${args[1]}`);
+              const permissiveCallback = new NativeCallback(function() {
+                return 0;
+              }, "int", ["pointer", "pointer", "int", "pointer"]);
+              args[1] = permissiveCallback;
             }
           });
+          console.log(`[NativeTlsBypass] Hooked conf_verify at ${confVerifyTarget}`);
         } catch (e) {
-          console.log(`[NativeTlsBypass] Failed to hook libunity.so manual offset: ${e}`);
         }
       }
     }
@@ -3852,6 +3924,54 @@ function hookUnityCert() {
     }
   });
 }
+function hookBestHttpTls() {
+  Il2Cpp.perform(() => {
+    try {
+      const bestHttpAssembly = Il2Cpp.domain.tryAssembly("BestHTTP");
+      if (bestHttpAssembly) {
+        console.log(`${ts2()} [+] Found BestHTTP assembly`);
+        const LegacyTlsAuth = bestHttpAssembly.image.tryClass("BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.LegacyTlsAuthentication");
+        if (LegacyTlsAuth) {
+          const notifyMethod = LegacyTlsAuth.tryMethod("NotifyServerCertificate", 1);
+          if (notifyMethod) {
+            notifyMethod.implementation = function(cert) {
+              console.log(`${ts2()} [BestHTTP] NotifyServerCertificate called -> Bypassing verification (no exception)`);
+              return;
+            };
+            console.log(`${ts2()} [+] \u2705 BestHTTP LegacyTlsAuthentication.NotifyServerCertificate hooked`);
+          } else {
+            console.log(`${ts2()} [!] LegacyTlsAuthentication found but NotifyServerCertificate method missing`);
+          }
+        } else {
+          console.log(`${ts2()} [!] BestHTTP LegacyTlsAuthentication class not found`);
+        }
+        const DefaultTlsClient = bestHttpAssembly.image.tryClass("BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.DefaultTlsClient");
+        if (DefaultTlsClient) {
+          const getAuthMethod = DefaultTlsClient.tryMethod("GetAuthentication");
+          if (getAuthMethod) {
+            console.log(`${ts2()} [+] Found DefaultTlsClient.GetAuthentication`);
+          }
+        }
+        const TlsProtocol = bestHttpAssembly.image.tryClass("BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol");
+        if (TlsProtocol) {
+          const raiseAlertFatal = TlsProtocol.tryMethod("RaiseAlertFatal", 2);
+          if (raiseAlertFatal) {
+            raiseAlertFatal.implementation = function(alertDesc, message) {
+              const msgStr = message?.toString() ?? "null";
+              console.log(`${ts2()} [BestHTTP] \u26A0\uFE0F RaiseAlertFatal INTERCEPTED: alertDesc=${alertDesc} msg="${msgStr}"`);
+              return;
+            };
+            console.log(`${ts2()} [+] \u2705 TlsProtocol.RaiseAlertFatal hooked (will swallow alerts)`);
+          }
+        }
+      } else {
+        console.log(`${ts2()} [!] BestHTTP assembly NOT found`);
+      }
+    } catch (e) {
+      console.log(`${ts2()} [!] BestHTTP TLS hook failed: ${e}`);
+    }
+  });
+}
 setImmediate(() => {
   try {
     hookLibc();
@@ -3876,6 +3996,12 @@ setImmediate(() => {
       hookUnityCert();
     } catch (e) {
       console.log(`[!] hookUnityCert failed: ${e}`);
+    }
+    try {
+      console.log(`${ts2()} [*] Hooking BestHTTP BouncyCastle TLS (CRITICAL for managed TLS)...`);
+      hookBestHttpTls();
+    } catch (e) {
+      console.log(`[!] hookBestHttpTls failed: ${e}`);
     }
   }, 3e3);
 });

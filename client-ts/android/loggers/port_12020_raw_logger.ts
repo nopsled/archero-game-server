@@ -401,6 +401,66 @@ function hookUnityCert() {
     });
 }
 
+// CRITICAL: Hook BestHTTP BouncyCastle TLS for managed certificate verification bypass
+function hookBestHttpTls() {
+    Il2Cpp.perform(() => {
+        try {
+            const bestHttpAssembly = Il2Cpp.domain.tryAssembly("BestHTTP");
+            if (bestHttpAssembly) {
+                console.log(`${ts()} [+] Found BestHTTP assembly`);
+
+                // Hook LegacyTlsAuthentication.NotifyServerCertificate - the key verification point
+                const LegacyTlsAuth = bestHttpAssembly.image.tryClass("BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.LegacyTlsAuthentication");
+                if (LegacyTlsAuth) {
+                    const notifyMethod = LegacyTlsAuth.tryMethod("NotifyServerCertificate", 1);
+                    if (notifyMethod) {
+                        notifyMethod.implementation = function (cert: Il2Cpp.Object) {
+                            console.log(`${ts()} [BestHTTP] NotifyServerCertificate called -> Bypassing verification (no exception)`);
+                            // Do nothing = no TlsFatalAlert exception = handshake succeeds
+                            return;
+                        };
+                        console.log(`${ts()} [+] ✅ BestHTTP LegacyTlsAuthentication.NotifyServerCertificate hooked`);
+                    } else {
+                        console.log(`${ts()} [!] LegacyTlsAuthentication found but NotifyServerCertificate method missing`);
+                    }
+                } else {
+                    console.log(`${ts()} [!] BestHTTP LegacyTlsAuthentication class not found`);
+                }
+
+                // Also try to hook DefaultTlsClient.GetAuthentication to return a permissive authenticator
+                const DefaultTlsClient = bestHttpAssembly.image.tryClass("BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.DefaultTlsClient");
+                if (DefaultTlsClient) {
+                    const getAuthMethod = DefaultTlsClient.tryMethod("GetAuthentication");
+                    if (getAuthMethod) {
+                        console.log(`${ts()} [+] Found DefaultTlsClient.GetAuthentication`);
+                        // Note: We can't easily replace this, but logging it helps understand the flow
+                    }
+                }
+
+                // Hook TlsProtocol.RaiseAlertFatal if accessible - this is where access_denied is raised
+                const TlsProtocol = bestHttpAssembly.image.tryClass("BestHTTP.SecureProtocol.Org.BouncyCastle.Crypto.Tls.TlsProtocol");
+                if (TlsProtocol) {
+                    const raiseAlertFatal = TlsProtocol.tryMethod("RaiseAlertFatal", 2);
+                    if (raiseAlertFatal) {
+                        raiseAlertFatal.implementation = function (alertDesc: number, message: Il2Cpp.String) {
+                            const msgStr = message?.toString() ?? "null";
+                            console.log(`${ts()} [BestHTTP] ⚠️ RaiseAlertFatal INTERCEPTED: alertDesc=${alertDesc} msg="${msgStr}"`);
+                            // Instead of raising, just log and return (swallow the exception)
+                            // This may cause issues but prevents the ACCESS_DENIED alert
+                            return;
+                        };
+                        console.log(`${ts()} [+] ✅ TlsProtocol.RaiseAlertFatal hooked (will swallow alerts)`);
+                    }
+                }
+            } else {
+                console.log(`${ts()} [!] BestHTTP assembly NOT found`);
+            }
+        } catch (e) {
+            console.log(`${ts()} [!] BestHTTP TLS hook failed: ${e}`);
+        }
+    });
+}
+
 setImmediate(() => {
     try {
         hookLibc();
@@ -421,6 +481,11 @@ setImmediate(() => {
             console.log(`${ts()} [*] Hooking Unity CertificateHandler...`);
             hookUnityCert();
         } catch (e) { console.log(`[!] hookUnityCert failed: ${e}`); }
+
+        try {
+            console.log(`${ts()} [*] Hooking BestHTTP BouncyCastle TLS (CRITICAL for managed TLS)...`);
+            hookBestHttpTls();
+        } catch (e) { console.log(`[!] hookBestHttpTls failed: ${e}`); }
     }, 3000); // 3s delay
 });
 

@@ -240,23 +240,113 @@ export class NativeTlsBypass {
         });
       }
 
-      // Manual hook for libunity.so (mbedtls verification)
+      // Manual hooks for libunity.so (Unity's mbedtls/UnityTLS)
       if (mod.name === "libunity.so") {
-        const offset = 0xbc25b4;
-        const target = mod.base.add(offset);
-        console.log(`[NativeTlsBypass] Hooking libunity.so verify function at ${target} (base+${ptr(offset)})`);
+        // Approach 1: REPLACE the verify result function entirely
+        // mbedtls_ssl_get_verify_result takes 1 arg (ssl context) and returns uint32_t
+        const verifyResultOffset = 0xbc25b4;
+        const verifyResultTarget = mod.base.add(verifyResultOffset);
+        console.log(`[NativeTlsBypass] Replacing libunity.so verify result at ${verifyResultTarget} (base+0x${verifyResultOffset.toString(16)})`);
         try {
-          Interceptor.attach(target, {
+          Interceptor.replace(verifyResultTarget, new NativeCallback(function (sslCtx: NativePointer) {
+            if (isDebugging) console.log(`[NativeTlsBypass] verify result REPLACED - returning 0`);
+            return 0; // Always return success
+          }, 'uint32', ['pointer']));
+          console.log(`[NativeTlsBypass] Successfully replaced verify result function`);
+        } catch (e) {
+          console.log(`[NativeTlsBypass] Failed to replace verify result: ${e}`);
+          // Fallback to attach if replace fails
+          try {
+            Interceptor.attach(verifyResultTarget, {
+              onEnter: function (args) {
+                if (isDebugging) console.log(`[NativeTlsBypass] verify result called (fallback attach)`);
+              },
+              onLeave: function (retval) {
+                if (isDebugging) console.log(`[NativeTlsBypass] verify result returning: ${retval} -> forcing 0`);
+                retval.replace(ptr(0));
+              }
+            });
+          } catch (e2) {
+            console.log(`[NativeTlsBypass] Fallback attach also failed: ${e2}`);
+          }
+        }
+
+        // Approach 2: Scan for and hook Unity TLS verification functions
+        // These are the actual verification callbacks that make the decision
+        try {
+          // Search for unitytls_x509verify string references
+          const ranges = mod.enumerateRanges('r-x');
+          for (const range of ranges) {
+            try {
+              // Scan for x509verify callback patterns - hook functions that call verification
+              Memory.scan(range.base, range.size, "FF 83 ?? ?? ?? ?? ?? 91", {
+                onMatch: (address, size) => {
+                  // This is a heuristic - looking for function prologues near verification code
+                  if (isDebugging) console.log(`[NativeTlsBypass] Found potential verify func at ${address}`);
+                },
+                onComplete: () => { }
+              });
+            } catch (e2) {
+              // Ignore scan errors
+            }
+          }
+        } catch (e) {
+          if (isDebugging) console.log(`[NativeTlsBypass] Scan failed: ${e}`);
+        }
+
+        // Approach 3: Hook mbedtls_ssl_handshake to patch authmode before handshake
+        // The authmode is stored in the ssl_context, we set it to 0 (MBEDTLS_SSL_VERIFY_NONE)
+        // Offset found via string "mbedtls_ssl_handshake" reference
+        const handshakeOffsets = [0xbb9a6c, 0xbb9a00]; // Common entry points
+        for (const offset of handshakeOffsets) {
+          try {
+            const target = mod.base.add(offset);
+            Interceptor.attach(target, {
+              onEnter: function (args) {
+                // args[0] = ssl_context pointer
+                // In mbedtls, authmode is at offset 232 in ssl_context (varies by version)
+                // Try common offsets for authmode field
+                const sslCtx = args[0];
+                const authmodeOffsets = [232, 236, 240, 248];
+                for (const authOffset of authmodeOffsets) {
+                  try {
+                    const currentMode = sslCtx.add(authOffset).readU32();
+                    if (currentMode === 1 || currentMode === 2) { // OPTIONAL or REQUIRED
+                      sslCtx.add(authOffset).writeU32(0); // Set to VERIFY_NONE
+                      if (isDebugging) console.log(`[NativeTlsBypass] Set authmode to VERIFY_NONE at offset ${authOffset}`);
+                    }
+                  } catch (e3) {
+                    // Ignore read/write errors
+                  }
+                }
+              }
+            });
+            console.log(`[NativeTlsBypass] Hooked handshake function at ${target} (base+0x${offset.toString(16)})`);
+          } catch (e) {
+            // This offset might not be valid
+          }
+        }
+
+        // Approach 4: Hook the verify callback setter to install our own permissive callback
+        // mbedtls_ssl_conf_verify or similar
+        const confVerifyOffset = 0xbbd428; // Estimated from nearby code
+        try {
+          const confVerifyTarget = mod.base.add(confVerifyOffset);
+          Interceptor.attach(confVerifyTarget, {
             onEnter: function (args) {
-              console.log(`[NativeTlsBypass] libunity.so verify function called (args: ${args[0]}, ${args[1]}, ${args[2]})`);
-            },
-            onLeave: function (retval) {
-              console.log(`[NativeTlsBypass] libunity.so verify function returning: ${retval} -> forcing 0`);
-              retval.replace(ptr(0));
+              // Replace the verification callback with one that always succeeds
+              // args[1] is typically the callback function pointer
+              if (isDebugging) console.log(`[NativeTlsBypass] conf_verify called, original callback: ${args[1]}`);
+              // We'll create a permissive callback
+              const permissiveCallback = new NativeCallback(function () {
+                return 0; // Success
+              }, 'int', ['pointer', 'pointer', 'int', 'pointer']);
+              args[1] = permissiveCallback;
             }
           });
+          console.log(`[NativeTlsBypass] Hooked conf_verify at ${confVerifyTarget}`);
         } catch (e) {
-          console.log(`[NativeTlsBypass] Failed to hook libunity.so manual offset: ${e}`);
+          // Offset might not be valid for this version
         }
       }
     }
